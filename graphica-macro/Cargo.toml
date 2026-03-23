@@ -1,0 +1,15 @@
+[package]
+name = "graphica-macro"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+encase_derive_impl = "*"
+proc-macro-crate = "3.1"
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
