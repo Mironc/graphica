@@ -1,27 +1,24 @@
 use ash::vk::{
-    self, AccessFlags, ClearColorValue, ClearValue, CommandBuffer, DescriptorBufferInfo, Extent2D,
+    AccessFlags, ClearColorValue, ClearValue, CommandBuffer, Extent2D,
     ImageLayout, PipelineBindPoint, PipelineStageFlags, RenderPassBeginInfo, ShaderStageFlags,
-    SubpassContents, WriteDescriptorSet,
+    SubpassContents,
 };
 use log::warn;
 
 use crate::{
     device::DeviceContext,
     render_graph::{
-        render_graph::{ResourceAccess, ResourceState, ResourceUsage},
         resource::ResourceId,
+        resource_state::{ResourceAccess, ResourceState, ResourceUsage},
     },
     rendering::{
-        buffer_container::{
-            GeneralBufferId, IndexBuffer, IndexBufferId, IndexData, VertexBuffer, VertexBufferId,
-            VertexData,
-        },
-        descriptor_container::{BindedRes, DescriptorId, RawDescriptorId},
+        buffer_container::GeneralBufferId,
+        descriptor_container::{BindedRes, DescriptorId},
         framebuffer_container::FramebufferId,
         pipeline_container::PipelineId,
         render_pass_container::AttachmentUsage,
         renderer_bundle::RendererBundle,
-        shader_container::{DescriptorBinding, PushWriter},
+        shader_container::PushWriter,
     },
 };
 
@@ -38,9 +35,9 @@ impl DrawCall {
         command_buffer: CommandBuffer,
         device: &DeviceContext,
     ) {
-        if let None = match self {
+        if (match self {
             DrawCall::Direct { draw_param } => draw_param.execute(bundle, command_buffer, device),
-        } {
+        }).is_none() {
             warn!("Draw call went wrong")
         }
     }
@@ -185,8 +182,8 @@ impl DrawParameters {
         }
 
         // descriptor sets write
-        if let Some(desc) = &self.desc {
-            if let Some(descriptor_sets) = bundle.descriptor_container.get_descriptor(desc.id()) {
+        if let Some(desc) = &self.desc
+            && let Some(descriptor_sets) = bundle.descriptor_container.get_descriptor(desc.id()) {
                 for (desc_bind, bind) in descriptor_sets.binded().iter() {
                     let res_state = match bind {
                         BindedRes::Buffer(general_buffer_id, offset, size) => {
@@ -219,7 +216,6 @@ impl DrawParameters {
                     resource_state.push(res_state);
                 }
             }
-        }
 
         if let DrawGeometry::Buffered { vbo, ebo } = self.geometry {
             resource_state.push(ResourceState::new(
@@ -257,7 +253,7 @@ impl DrawParameters {
         let framebuffer = bundle
             .framebuffer_container
             .get_framebuffer(self.framebuffer)?;
-        let view_ids = framebuffer.views_id();
+        let _view_ids = framebuffer.views_id();
         let render_pass = pipeline.render_pass();
         let viewports = [ash::vk::Viewport::default()
             .width(framebuffer.width() as f32)
@@ -312,20 +308,18 @@ impl DrawParameters {
                     &push_buf,
                 );
             }
-            if let Some(desc_id) = &self.desc {
-                if let Some(descriptor) = bundle.descriptor_container.get_descriptor(desc_id.id()) {
-                    if !descriptor.binded().is_empty() {
+            if let Some(desc_id) = &self.desc
+                && let Some(descriptor) = bundle.descriptor_container.get_descriptor(desc_id.id())
+                    && !descriptor.binded().is_empty() {
                         device.cmd_bind_descriptor_sets(
                             command_buffer,
                             PipelineBindPoint::GRAPHICS,
                             pipeline.pipeline_layout().pipeline_layout(),
                             0,
-                            &descriptor.handles(),
+                            descriptor.handles(),
                             &[],
                         );
                     }
-                }
-            }
             match self.geometry {
                 DrawGeometry::Buffered { vbo, ebo } => {
                     let vertex_buffer = bundle.buffer_container.get_general_buffer(vbo)?;
@@ -335,7 +329,7 @@ impl DrawParameters {
                     let buffers = [vertex_buffer.handle()];
                     let offsets = [0];
                     device.cmd_bind_vertex_buffers(command_buffer, 0, &buffers, &offsets);
-                    if let Some(index_buffer) = index_buffer {
+                    if let Some(_index_buffer) = index_buffer {
                         todo!("Add indexed drawing")
                     } else {
                         // TODO:Add first vertex parameter (for the sake of bindless resource impl)

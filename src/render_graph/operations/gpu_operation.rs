@@ -1,18 +1,16 @@
 use ash::vk::{
-    AccessFlags, BufferImageCopy, CommandBuffer, ImageAspectFlags, ImageLayout, ImageSubresource,
+    AccessFlags, BufferImageCopy, CommandBuffer, ImageAspectFlags, ImageLayout,
     ImageSubresourceLayers, Offset3D, PipelineStageFlags,
 };
 use encase::DynamicUniformBuffer;
-use image::{
-    DynamicImage, EncodableLayout, GenericImageView, RgbaImage, imageops::FilterType::Lanczos3,
-};
+use image::{EncodableLayout, RgbaImage};
 
 use crate::{
     device::DeviceContext,
     render_graph::{
         operations::draw_call::DrawCall,
-        render_graph::{ResourceAccess, ResourceState, ResourceUsage},
         resource::ResourceId,
+        resource_state::{ResourceAccess, ResourceState, ResourceUsage},
     },
     rendering::{
         buffer_container::{
@@ -20,7 +18,7 @@ use crate::{
             VertexBufferId, VertexData,
         },
         renderer_bundle::RendererBundle,
-        texture_container::{TextureId, TextureViewId},
+        texture_container::TextureId,
     },
     swapchain::FrameData,
 };
@@ -101,7 +99,6 @@ impl Operation {
             }
             Operation::Present(_) => {
                 //nothing cuz we need only to sync image
-                ()
             }
             Operation::UploadImage(upload_image_op) => {
                 upload_image_op.execute(command_buffer, bundle, device);
@@ -145,7 +142,7 @@ impl WriteBufferOp {
     }
     pub fn uniform_buffer<U: UniformData + encase::internal::WriteInto>(
         buff: UniformBufferId<U>,
-        mut data: Vec<U>,
+        data: Vec<U>,
         offset: u64,
     ) -> Option<Self> {
         // Writes to outside of binded memory -> return None
@@ -177,7 +174,7 @@ impl WriteBufferOp {
         if let Some(ptr) = allocation.mapped_ptr() {
             unsafe {
                 std::ptr::copy_nonoverlapping(
-                    self.data.as_ptr() as *const u8,
+                    self.data.as_ptr(),
                     ptr.as_ptr() as *mut u8,
                     size as usize,
                 );
@@ -232,7 +229,7 @@ impl UploadImageOp {
         if let Some(ptr) = allocation.mapped_ptr() {
             unsafe {
                 std::ptr::copy_nonoverlapping(
-                    data.as_ptr() as *const u8,
+                    data.as_ptr(),
                     ptr.as_ptr() as *mut u8,
                     size as usize,
                 );

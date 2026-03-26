@@ -3,7 +3,7 @@ use std::{error::Error, sync::Arc};
 use ash::{
     khr::swapchain,
     vk::{
-        self, Extent2D, Fence, FenceCreateFlags, FenceCreateInfo, Format, Image, ImageView,
+        self, Extent2D, Fence,
         SwapchainKHR,
     },
 };
@@ -207,7 +207,7 @@ impl SwapChain {
     ///
     ///It may block thread, if swapchain has no free images and previous frames are not dropped via present_frame()
     pub fn next_frame(&mut self, device_context: &DeviceContext) -> FrameData {
-        let current_sync = self.syncs[self.current_frame].clone();
+        let current_sync = self.syncs[self.current_frame];
         current_sync.wait(device_context);
 
         let image_id = unsafe {

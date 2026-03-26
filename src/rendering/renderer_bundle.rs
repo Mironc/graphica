@@ -1,13 +1,13 @@
 use crate::{
     device::DeviceContext,
-    render_graph::{render_graph::ResourceState, resource::ResourceId},
+    render_graph::resource::ResourceId,
     rendering::{
         buffer_container::BufferContainer, descriptor_container::DescriptorContainer,
         framebuffer_container::FramebufferContainer, pipeline_container::PipelineContainer,
         render_pass_container::RenderPassContainer, shader_container::ShaderContainer,
         state_container::StateContainer, texture_container::TextureContainer,
     },
-    swapchain::{FrameData, FrameImage},
+    swapchain::FrameImage,
 };
 #[derive(Default)]
 pub struct RendererBundle {

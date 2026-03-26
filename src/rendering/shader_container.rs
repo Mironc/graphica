@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 
-use ash::vk::{self, DescriptorPoolSize, DescriptorType, PushConstantRange};
+use ash::vk::{self, DescriptorPoolSize, PushConstantRange};
 use encase::internal::BufferMut;
 use naga::AddressSpace;
 use naga::back::spv::PipelineOptions;
@@ -25,7 +25,7 @@ impl ShaderContainer {
         let mut parser = naga::front::glsl::Frontend::default();
         let options = naga::front::glsl::Options::from(shader_type.into_stage());
         let module = parser
-            .parse(&options, &shader_source)
+            .parse(&options, shader_source)
             .map_err(|e| eprintln!("{}", e.emit_to_string(shader_source)))
             .unwrap();
 
@@ -47,31 +47,31 @@ impl ShaderContainer {
             push_constants: Vec::new(),
             name_to_push: HashMap::new(),
         };
-        for (handle, variable) in module.global_variables.iter() {
+        for (_handle, variable) in module.global_variables.iter() {
             if let Some(binding) = &variable.binding {
-                let naga_ty = module.types[variable.ty].clone();
+                let _naga_ty = module.types[variable.ty].clone();
                 let ty = match variable.space {
                     AddressSpace::Uniform => Some(vk::DescriptorType::UNIFORM_BUFFER),
-                    AddressSpace::Storage { access } => Some(vk::DescriptorType::STORAGE_BUFFER),
+                    AddressSpace::Storage { access: _ } => Some(vk::DescriptorType::STORAGE_BUFFER),
                     AddressSpace::Handle => Some({
                         match module.types[variable.ty].inner {
                             naga::TypeInner::Image {
-                                dim,
-                                arrayed,
+                                dim: _,
+                                arrayed: _,
                                 class,
                             } => match class {
-                                naga::ImageClass::Sampled { kind, multi } => {
+                                naga::ImageClass::Sampled { kind: _, multi: _ } => {
                                     vk::DescriptorType::SAMPLED_IMAGE
                                 }
-                                naga::ImageClass::Depth { multi } => {
+                                naga::ImageClass::Depth { multi: _ } => {
                                     vk::DescriptorType::SAMPLED_IMAGE
                                 }
-                                naga::ImageClass::Storage { format, access } => {
+                                naga::ImageClass::Storage { format: _, access: _ } => {
                                     vk::DescriptorType::STORAGE_IMAGE
                                 }
                             },
-                            naga::TypeInner::Sampler { comparison } => vk::DescriptorType::SAMPLER,
-                            naga::TypeInner::BindingArray { base, size } => todo!(),
+                            naga::TypeInner::Sampler { comparison: _ } => vk::DescriptorType::SAMPLER,
+                            naga::TypeInner::BindingArray { base: _, size: _ } => todo!(),
                             _ => unreachable!(), //in theory
                         }
                     }),
@@ -94,7 +94,7 @@ impl ShaderContainer {
                 println!("Found push_constant {:?}", &naga_ty);
                 let mut fields = Vec::new();
                 match &naga_ty.inner {
-                    naga::TypeInner::Struct { members, span } => {
+                    naga::TypeInner::Struct { members, span: _ } => {
                         for field in members.iter() {
                             println!("encountered field:{:?}", module.types[field.ty]);
                             if let Some(name) = &field.name {
@@ -256,7 +256,7 @@ impl ShaderLayout {
     pub fn descriptor_pool_sizes(&self) -> Vec<DescriptorPoolSize> {
         let mut by_type = HashMap::new();
         for desc_bind in self.bindings.iter() {
-            let mut entry: &mut Vec<DescriptorBinding> = by_type.entry(desc_bind.ty).or_default();
+            let entry: &mut Vec<DescriptorBinding> = by_type.entry(desc_bind.ty).or_default();
             entry.push(*desc_bind);
         }
         let mut sizes = Vec::new();

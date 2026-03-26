@@ -50,13 +50,12 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
                 if current_node == node.0 {
                     return true;
                 }
-                if visited.insert(current_node) {
-                    if let Some(children) = self.edges.get(current_node) {
+                if visited.insert(current_node)
+                    && let Some(children) = self.edges.get(current_node) {
                         for child in children.iter() {
                             stack.push(child.0);
                         }
                     }
-                }
             }
         }
         false
@@ -75,13 +74,12 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
                 return true;
             }
 
-            if visited.insert(current) {
-                if let Some(children) = self.edges.get(current) {
+            if visited.insert(current)
+                && let Some(children) = self.edges.get(current) {
                     for (child_idx, _) in children {
                         stack.push(*child_idx);
                     }
                 }
-            }
         }
         false
     }

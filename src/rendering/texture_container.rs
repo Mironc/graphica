@@ -3,7 +3,7 @@ use std::{collections::HashMap, error::Error};
 use ash::vk::{
     Extent3D, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageSubresourceRange,
     ImageTiling, ImageType, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType,
-    SampleCountFlags, SamplerAddressMode, SamplerCreateInfo, SamplerMipmapMode,
+    SampleCountFlags, SamplerAddressMode, SamplerCreateInfo,
 };
 use gpu_allocator::{
     MemoryLocation,
@@ -75,7 +75,7 @@ impl TextureContainer {
             requirements: image_mem_req,
             location: MemoryLocation::GpuOnly,
             linear: false,
-            allocation_scheme: vulkan::AllocationScheme::DedicatedImage(image.clone()),
+            allocation_scheme: vulkan::AllocationScheme::DedicatedImage(image),
         })?;
         unsafe { device.bind_image_memory(image, alloc.memory(), alloc.offset()) }.unwrap();
         let texture = Texture {
@@ -188,7 +188,7 @@ impl TextureContainer {
         options: SamplingOptions,
     ) -> Option<Sampler> {
         if let Some(&sampler) = self.samplers.get(&options) {
-            return Some(sampler);
+            Some(sampler)
         } else {
             let sampler_createinfo = SamplerCreateInfo::default()
                 .anisotropy_enable(false)
@@ -199,7 +199,7 @@ impl TextureContainer {
                 .min_filter(options.min_filter.into_vk_filter())
                 .unnormalized_coordinates(false);
             let handle = unsafe { device.create_sampler(&sampler_createinfo, None) }.ok()?;
-            let sampler = Sampler { handle, options };
+            let sampler = Sampler { handle };
             self.samplers.insert(options, sampler);
             Some(sampler)
         }
@@ -350,8 +350,9 @@ impl CreateTextureView {
         self
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextureFormat {
+    #[default]
     R8G8B8A8,
     B8G8R8A8,
     R8G8,
@@ -386,16 +387,10 @@ impl TextureFormat {
         }
     }
 }
-impl Default for TextureFormat {
-    fn default() -> Self {
-        TextureFormat::R8G8B8A8
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Sampler {
     handle: ash::vk::Sampler,
-    options: SamplingOptions,
 }
 
 impl Sampler {

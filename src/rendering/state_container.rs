@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::render_graph::{render_graph::ResourceState, resource::ResourceId};
+use crate::render_graph::{resource::ResourceId, resource_state::ResourceState};
 
 #[derive(Debug, Clone, Default)]
 pub struct StateContainer {
@@ -14,7 +14,7 @@ impl StateContainer {
         self.states.entry(resource_id).or_insert(state);
     }
     pub fn get(&self, resource_id: ResourceId) -> Option<ResourceState> {
-        self.states.get(&resource_id).and_then(|x| Some(*x))
+        self.states.get(&resource_id).copied()
     }
     pub fn remove(&mut self, resource_id: ResourceId) {
         self.states.remove(&resource_id);

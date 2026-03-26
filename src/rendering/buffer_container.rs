@@ -75,7 +75,6 @@ impl BufferContainer {
             staging: create_buffer.staging,
             type_id: TypeId::of::<T>(),
             alloc,
-            buffer_usage: usage,
             item_size: type_size,
             size: create_buffer.len,
         };
@@ -229,7 +228,9 @@ impl GeneralBufferId {
     pub fn len(&self) -> u64 {
         self.len
     }
-
+    pub fn is_empty(&self) -> bool {
+        self.item_size == 0
+    }
     pub fn item_size(&self) -> u64 {
         self.item_size
     }
@@ -242,7 +243,6 @@ pub struct GeneralBuffer {
     type_id: TypeId,
     alloc: Allocation,
     staging: bool,
-    buffer_usage: BufferUsageFlags,
     item_size: u64,
     size: u64,
 }
@@ -319,7 +319,7 @@ pub struct StorageBufferId<T: StorageData> {
     gener: GeneralBufferId,
     _marker: PhantomData<T>,
 }
-impl<'a, T> Deref for StorageBufferId<T>
+impl<T> Deref for StorageBufferId<T>
 where
     T: StorageData,
 {
@@ -340,7 +340,7 @@ where
     type Target = GeneralBuffer;
 
     fn deref(&self) -> &Self::Target {
-        &self.gener
+        self.gener
     }
 }
 
@@ -349,7 +349,7 @@ pub struct UniformBufferId<T: UniformData> {
     gener: GeneralBufferId,
     _marker: PhantomData<T>,
 }
-impl<'a, T> Deref for UniformBufferId<T>
+impl<T> Deref for UniformBufferId<T>
 where
     T: UniformData,
 {
@@ -370,7 +370,7 @@ where
     type Target = GeneralBuffer;
 
     fn deref(&self) -> &Self::Target {
-        &self.gener
+        self.gener
     }
 }
 #[derive(Debug, Clone, Copy)]
@@ -378,7 +378,7 @@ pub struct VertexBufferId<T: VertexData> {
     gener: GeneralBufferId,
     _marker: PhantomData<T>,
 }
-impl<'a, T> Deref for VertexBufferId<T>
+impl<T> Deref for VertexBufferId<T>
 where
     T: VertexData,
 {
@@ -399,14 +399,14 @@ where
     type Target = GeneralBuffer;
 
     fn deref(&self) -> &Self::Target {
-        &self.gener
+        self.gener
     }
 }
 pub struct IndexBufferId<T: IndexData> {
     gener: GeneralBufferId,
     _marker: PhantomData<T>,
 }
-impl<'a, T> Deref for IndexBufferId<T>
+impl<T> Deref for IndexBufferId<T>
 where
     T: IndexData,
 {
@@ -427,7 +427,7 @@ where
     type Target = GeneralBuffer;
 
     fn deref(&self) -> &Self::Target {
-        &self.gener
+        self.gener
     }
 }
 /// **Auto trait.**
@@ -435,17 +435,22 @@ pub trait GpuData: 'static {}
 
 impl<T: 'static> GpuData for T {}
 
+/// # Safety
 /// **Not intented to be implemented by user.**
 ///
-///  Please use attribute `#[[storage_data]]`
+/// **Please use attribute `#[[storage_data]]`**
 pub unsafe trait StorageData: encase::ShaderType + GpuData {}
 
+/// # Safety
 /// **Not intented to be implemented by user.**
 ///
-///  Please use attribute `#[[uniform_data]]`
+/// **Please use attribute `#[[uniform_data]]`**
 pub unsafe trait UniformData: encase::ShaderType + GpuData {}
 
+/// # Safety
 /// **Not intented to be implemented by user.**
+///
+/// please use one of these types: u32, u16
 pub unsafe trait IndexData: GpuData {}
 unsafe impl IndexData for u32 {}
 unsafe impl IndexData for u16 {}
@@ -547,7 +552,11 @@ impl ToVertexAttribute for f32 {
         }]
     }
 }
-/// **Not intented to be implemented by user. Please use `#[derive(VertexData)]`**
+/// # Safety
+///
+/// **Not intented to be implemented by user.**
+///
+/// **Please use `#[derive(VertexData)]`**
 ///
 /// This trait defines how Vulkan will be treating vertex buffer
 ///

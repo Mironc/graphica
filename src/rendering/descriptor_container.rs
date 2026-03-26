@@ -1,9 +1,9 @@
 use std::{collections::HashMap, error::Error, thread::ThreadId};
 
 use ash::vk::{
-    DescriptorBufferInfo, DescriptorImageInfo, DescriptorPool, DescriptorPoolCreateFlags,
-    DescriptorPoolCreateInfo, DescriptorPoolSize, DescriptorSetAllocateInfo, DescriptorSetLayout,
-    DescriptorType, ImageLayout, PipelineStageFlags, WriteDescriptorSet,
+    DescriptorBufferInfo, DescriptorImageInfo, DescriptorPool, DescriptorPoolCreateInfo,
+    DescriptorSetAllocateInfo, DescriptorSetLayout, DescriptorType, ImageLayout,
+    WriteDescriptorSet,
 };
 use slotmap::SlotMap;
 
@@ -127,15 +127,13 @@ impl DescriptorContainer {
                 .collect::<Vec<(Vec<DescriptorBufferInfo>, DescriptorBinding)>>();
             let buf_writes = buffers
                 .iter()
-                .filter_map(|x| {
-                    Some(
-                        WriteDescriptorSet::default()
-                            .buffer_info(&x.0)
-                            .descriptor_count(1)
-                            .dst_set(sets.handles()[x.1.set as usize])
-                            .dst_binding(x.1.binding)
-                            .descriptor_type(DescriptorType::UNIFORM_BUFFER),
-                    )
+                .map(|x| {
+                    WriteDescriptorSet::default()
+                        .buffer_info(&x.0)
+                        .descriptor_count(1)
+                        .dst_set(sets.handles()[x.1.set as usize])
+                        .dst_binding(x.1.binding)
+                        .descriptor_type(DescriptorType::UNIFORM_BUFFER)
                 })
                 .collect::<Vec<WriteDescriptorSet>>();
 
@@ -165,28 +163,24 @@ impl DescriptorContainer {
             ).collect::<Vec<(Vec<DescriptorImageInfo>,DescriptorBinding)>>();
             let sampler_writes = samplers
                 .iter()
-                .filter_map(|x| {
-                    Some(
-                        WriteDescriptorSet::default()
-                            .image_info(&x.0)
-                            .descriptor_count(1)
-                            .dst_set(sets.handles()[x.1.set as usize])
-                            .dst_binding(x.1.binding)
-                            .descriptor_type(DescriptorType::SAMPLER),
-                    )
+                .map(|x| {
+                    WriteDescriptorSet::default()
+                        .image_info(&x.0)
+                        .descriptor_count(1)
+                        .dst_set(sets.handles()[x.1.set as usize])
+                        .dst_binding(x.1.binding)
+                        .descriptor_type(DescriptorType::SAMPLER)
                 })
                 .collect::<Vec<WriteDescriptorSet>>();
             let texture_writes = textures
                 .iter()
-                .filter_map(|x| {
-                    Some(
-                        WriteDescriptorSet::default()
-                            .image_info(&x.0)
-                            .descriptor_count(1)
-                            .dst_set(sets.handles()[x.1.set as usize])
-                            .dst_binding(x.1.binding)
-                            .descriptor_type(DescriptorType::SAMPLED_IMAGE),
-                    )
+                .map(|x| {
+                    WriteDescriptorSet::default()
+                        .image_info(&x.0)
+                        .descriptor_count(1)
+                        .dst_set(sets.handles()[x.1.set as usize])
+                        .dst_binding(x.1.binding)
+                        .descriptor_type(DescriptorType::SAMPLED_IMAGE)
                 })
                 .collect::<Vec<WriteDescriptorSet>>();
             let writes = buf_writes
