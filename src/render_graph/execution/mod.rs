@@ -1,19 +1,12 @@
-use std::{
-    collections::HashMap,
-    ffi::CString,
-    str::FromStr,
-};
+use std::{collections::HashMap, ffi::CString, str::FromStr};
 
 use ash::vk::{CommandBuffer, CommandBufferBeginInfo, DebugUtilsLabelEXT};
 
 use crate::{
     device::DeviceContext,
     render_graph::{
-        operations::{
-            draw_call::DrawCall,
-            gpu_operation::Operation,
-        },
-        render_graph::Action,
+        operations::{draw_call::DrawCall, gpu_operation::Operation},
+        render_graph::{Action, Executable},
     },
     rendering::renderer_bundle::RendererBundle,
     swapchain::FrameData,
@@ -29,7 +22,7 @@ pub trait Executor {
 }
 #[derive(Debug, Clone)]
 pub struct EasyExecutor {
-    pub actions: Vec<Action>,
+    pub exec: Executable,
 }
 impl Executor for EasyExecutor {
     fn execute(
@@ -55,14 +48,16 @@ impl Executor for EasyExecutor {
             // device
             //     .debug_fns()
             //     .cmd_begin_debug_utils_label(command_buffer, &debug_label);
-            for action in self.actions.iter() {
+            for action in self.exec.iter() {
                 // println!("executed:{:?}", action);
-                if let Action::Op(Operation::DrawCall(DrawCall::Direct { draw_param })) = &action
-                    && let Some(new_states) = draw_param.resource_state(bundle) {
-                        for new_state in new_states {
-                            last_state.insert(new_state.resource_id(), new_state);
-                        }
-                    };
+                if let Action::Op((Operation::DrawCall(DrawCall::Direct { draw_param }), _)) =
+                    &action
+                    && let Some(new_states) = draw_param.resource_state(bundle)
+                {
+                    for new_state in new_states {
+                        last_state.insert(new_state.resource_id(), new_state);
+                    }
+                };
                 action.execute(bundle, command_buffer, device);
             }
             //device.debug_fns().cmd_end_debug_utils_label(command_buffer);

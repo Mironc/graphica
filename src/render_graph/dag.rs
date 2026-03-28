@@ -3,7 +3,9 @@ use std::collections::{HashSet, VecDeque};
 #[derive(Debug, Clone)]
 pub struct DirectedAcyclicGraph<N, E> {
     nodes: Vec<N>,
+    /// Contains edges that goes FROM node
     edges: Vec<Vec<(usize, E)>>,
+    /// Contains edges that goes INTO node
     rev_edges: Vec<Vec<usize>>,
 }
 impl<N, E> DirectedAcyclicGraph<N, E> {
@@ -40,22 +42,44 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
         self.edges.push(Vec::new());
         self.rev_edges.push(Vec::new());
     }
-
+    pub fn count_paths_to(&self, node_from: usize, node_to: usize) -> usize {
+        if self.has_cycle() {
+            return 0;
+        }
+        let mut stack = vec![node_from];
+        let mut count = 0;
+        while let Some(current) = stack.pop() {
+            if current == node_to {
+                count += 1;
+            }
+            for node_id in self.edges[current].iter() {
+                stack.push(node_id.0);
+            }
+        }
+        count
+    }
     pub fn has_cycle(&self) -> bool {
         for node in self.nodes.iter().enumerate() {
-            let mut stack = vec![node.0];
+            let mut stack = Vec::new();
             let mut visited = HashSet::new();
+            if let Some(children) = self.edges.get(node.0) {
+                for child in children.iter() {
+                    stack.push(child.0);
+                }
+            }
 
             while let Some(current_node) = stack.pop() {
                 if current_node == node.0 {
+                    println!("{} {}", current_node, node.0);
                     return true;
                 }
                 if visited.insert(current_node)
-                    && let Some(children) = self.edges.get(current_node) {
-                        for child in children.iter() {
-                            stack.push(child.0);
-                        }
+                    && let Some(children) = self.edges.get(current_node)
+                {
+                    for child in children.iter() {
+                        stack.push(child.0);
                     }
+                }
             }
         }
         false
@@ -75,11 +99,12 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
             }
 
             if visited.insert(current)
-                && let Some(children) = self.edges.get(current) {
-                    for (child_idx, _) in children {
-                        stack.push(*child_idx);
-                    }
+                && let Some(children) = self.edges.get(current)
+            {
+                for (child_idx, _) in children {
+                    stack.push(*child_idx);
                 }
+            }
         }
         false
     }

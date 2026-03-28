@@ -137,22 +137,22 @@ impl TextureContainer {
         self.image_views.get(view_id.raw_id)
     }
 
-    pub fn insert_framedata(&mut self, frame_data: &FrameData) -> (TextureId, TextureViewId) {
-        if let Some(res) = self.swapchain_frame.get(frame_data.image()) {
+    pub fn insert_frameimage(&mut self, frame_image: &FrameImage) -> (TextureId, TextureViewId) {
+        if let Some(res) = self.swapchain_frame.get(frame_image) {
             return *res;
         }
         let texture = Texture {
-            image: frame_data.image().image(),
+            image: frame_image.image(),
             alloc: Allocation::default(),
             image_type: ImageType::TYPE_2D,
-            extent: Extent3D::from(frame_data.image().extent()),
-            texture_format: TextureFormat::Swapchain(frame_data.image().format()),
+            extent: Extent3D::from(frame_image.extent()),
+            texture_format: TextureFormat::Swapchain(frame_image.format()),
         };
         let texture_id = self.images.insert(texture);
         let texture_view = TextureView {
-            handle: frame_data.image().image_view(),
-            extent: frame_data.image().extent().into(),
-            format: TextureFormat::Swapchain(frame_data.image().format()),
+            handle: frame_image.image_view(),
+            extent: frame_image.extent().into(),
+            format: TextureFormat::Swapchain(frame_image.format()),
         };
         let raw_id = self.image_views.insert(texture_view);
         let texture_view_id = TextureViewId {
@@ -160,13 +160,16 @@ impl TextureContainer {
             raw_id,
         };
         self.swapchain_frame
-            .insert(*frame_data.image(), (texture_id, texture_view_id));
+            .insert(*frame_image, (texture_id, texture_view_id));
         log::info!(
             "inserted framedata: {:?}\n swapchain frames: {:?}",
-            frame_data,
+            frame_image,
             self.swapchain_frame
         );
         (texture_id, texture_view_id)
+    }
+    pub fn get_frameimage(&self, frame_image: &FrameImage) -> Option<&(TextureId, TextureViewId)> {
+        self.swapchain_frame.get(frame_image)
     }
     pub fn remove_frameimage(
         &mut self,

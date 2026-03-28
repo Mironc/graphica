@@ -22,7 +22,7 @@ pub use graphica_macro::{ShaderType, storage_data, uniform_data};
 /// Centralized container for storing all that related to buffers
 #[derive(Default)]
 pub struct BufferContainer {
-    buffers: SlotMap<RawBufferId, GeneralBuffer>,
+    buffers: SlotMap<BufferId, GeneralBuffer>,
 }
 impl BufferContainer {
     pub fn new() -> Self {
@@ -204,7 +204,7 @@ impl BufferContainer {
 }
 slotmap::new_key_type! {
     /// Unique identifier to `GeneralBuffer` in a `BufferContainer`
-    pub struct RawBufferId;
+    pub struct BufferId;
 }
 
 pub enum BufferUsage {
@@ -219,7 +219,7 @@ pub enum BufferUsage {
 /// Unique identifier to `GeneralBuffer` in a `BufferContainer` with extra information
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GeneralBufferId {
-    key_data: RawBufferId,
+    key_data: BufferId,
     len: u64,
     item_size: u64,
 }
@@ -233,6 +233,9 @@ impl GeneralBufferId {
     }
     pub fn item_size(&self) -> u64 {
         self.item_size
+    }
+    pub fn key_data(&self) -> BufferId {
+        self.key_data
     }
 }
 /// Represents buffer with no type constraints

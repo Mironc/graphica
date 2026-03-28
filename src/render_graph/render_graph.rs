@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use ash::vk::{
-    BufferMemoryBarrier, CommandBuffer, DependencyFlags, ImageAspectFlags, ImageMemoryBarrier, ImageSubresourceRange,
-};
+use ash::vk::CommandBuffer;
 
 use crate::{
     device::DeviceContext,
@@ -18,6 +16,7 @@ use crate::{
 /// This struct purpose is to optimize rendering with batching, optimal synchronization usage, parallelization and culling
 pub struct RenderGraph {
     dag: DirectedAcyclicGraph<Operation, Vec<StateTransition>>,
+    labeled_nodes: HashMap<usize, String>,
     target_node: usize,
 }
 impl Default for RenderGraph {
@@ -31,6 +30,7 @@ impl RenderGraph {
         Self {
             dag: DirectedAcyclicGraph::new(),
             target_node: 0,
+            labeled_nodes: HashMap::default(),
         }
     }
     /// Inserts operation into render graph
@@ -39,24 +39,35 @@ impl RenderGraph {
     pub fn add_operation(&mut self, op: Operation) {
         self.dag.add_node(op);
     }
-
+    /// Inserts operation into render graph with a label
+    ///
+    /// If operation is not infuencing any target operations it would be culled at compilation
+    pub fn add_operation_labeled(&mut self, op: Operation, label: String) {
+        self.dag.add_node(op);
+        self.labeled_nodes
+            .insert(self.dag().node_count() - 1, label);
+    }
     /// Inserts operation into render graph marked as targeted, `target` operations are the ones that define output of app
     pub fn add_target_op(&mut self, target: Operation) {
         self.dag.add_node(target);
         self.target_node = self.dag.node_count() - 1;
     }
-
-    /// This function is the main feature of render graph
+    /// Inserts operation into render graph marked as targeted with label
     ///
-    /// It finishes graph, culls unused branches, orders operations and includes synchronization points
-    pub fn compile(&mut self, bundle: &mut RendererBundle) -> Option<Vec<Action>> {
+    pub fn add_target_op_labeled(&mut self, target: Operation, label: String) {
+        self.dag.add_node(target);
+        self.target_node = self.dag.node_count() - 1;
+        self.labeled_nodes
+            .insert(self.dag().node_count() - 1, label);
+    }
+    /// Creates edges in graph based on whetever operation writes into resources that are used by other operation
+    fn fill_in(&mut self, bundle: &RendererBundle) {
         let nodes = self.dag.nodes().clone();
 
+        // Start from the op node, and goes down
         let mut stack = vec![self.target_node];
         let mut visited = std::collections::HashSet::new();
         visited.insert(self.target_node);
-
-        //Fills in graph: creates edges in graph based on whetever operation or any of it children makes influence onto the target's operation read_resources()
         while let Some(current_id) = stack.pop() {
             let current_node = nodes.get(current_id).unwrap();
             for (node_id, node) in nodes.iter().enumerate() {
@@ -64,6 +75,7 @@ impl RenderGraph {
                     continue;
                 }
                 if node_id > current_id {
+                    log::debug!("Break");
                     break;
                 }
                 let initial_resource_state = node.resource_state(bundle);
@@ -76,11 +88,8 @@ impl RenderGraph {
                         .filter_map(|x| {
                             final_resource_state
                                 .iter()
-                                .find(|y| StateTransition::edge_makes_sense(y, &x))
-                                .map(|y| {
-                                    
-                                    StateTransition::new(x, *y)
-                                })
+                                .find(|y| StateTransition::edge_makes_sense(&x, y))
+                                .map(|y| StateTransition::new(x, *y))
                         })
                         .collect::<Vec<StateTransition>>();
                     if !result.is_empty() {
@@ -92,6 +101,12 @@ impl RenderGraph {
                 }
             }
         }
+    }
+    /// This function is the main feature of render graph
+    ///
+    /// It finishes graph, culls unused branches, orders operations and includes synchronization points
+    pub fn compile(&mut self, bundle: &RendererBundle) -> Option<Executable> {
+        self.fill_in(bundle);
         //Removes nodes that are not influencing on target nodes and makes topological sort (linearizing operation order)
         let compiled = self.dag.compile(self.target_node)?;
 
@@ -108,7 +123,8 @@ impl RenderGraph {
                             let sync_op = SyncOp::from_transition(&transition);
                             acc.push_sync_op(sync_op);
                         }
-                    } else if let Some(resource_state) = bundle.resource_state.get(x.resource_id()) {
+                    } else if let Some(resource_state) = bundle.resource_state.get(x.resource_id())
+                    {
                         let transition = StateTransition::new(resource_state, x);
                         if transition.sync_makes_sense() {
                             let sync_op = SyncOp::from_transition(&transition);
@@ -124,7 +140,7 @@ impl RenderGraph {
             if !pre_sync.is_empty() {
                 actions.push(Action::Sync(pre_sync));
             }
-            actions.push(Action::Op(node));
+            actions.push(Action::Op((node, x)));
         }
         Some(actions)
     }
@@ -136,9 +152,72 @@ impl RenderGraph {
         self.dag.clear();
     }
 }
+#[cfg(feature = "graph-visualize")]
+impl RenderGraph {
+    /// Turns render graph into graphviz .dot format
+    pub fn into_dot(&mut self, bundle: &RendererBundle) -> String {
+        use petgraph::{dot::Dot, graph::DiGraph, prelude::NodeIndex};
+
+        self.fill_in(bundle);
+        let render_graph = self.dag();
+        let mut graph = DiGraph::default();
+        for node in render_graph.nodes() {
+            graph.add_node(node);
+        }
+        for (i, node) in render_graph.edges().iter().enumerate() {
+            for (to, _) in node.iter() {
+                let paths = render_graph.count_paths_to(i, *to);
+                println!("{}", paths);
+                if paths == 1 {
+                    graph.add_edge(i.into(), (*to).into(), ());
+                }
+            }
+        }
+        let binding = |_, node_ref: (NodeIndex<usize>, &&Operation)| {
+            let label = self.labeled_nodes.get(&node_ref.0.index());
+            format!("{}", node_ref.1.fmt_dot(bundle, label.map(|x| x.as_str())))
+        };
+        let as_dot = Dot::with_attr_getters(
+            &graph,
+            &[
+                petgraph::dot::Config::EdgeNoLabel,
+                petgraph::dot::Config::NodeNoLabel,
+            ],
+            &|_, edge_ref| format!(""),
+            &binding,
+        );
+        format!("{:?}", as_dot)
+    }
+    /// Compiles render graph and then turns into graphviz .dot format
+    pub fn compile_into_dot(&mut self, bundle: &RendererBundle) -> Option<String> {
+        use petgraph::{dot::Dot, graph::DiGraph, prelude::NodeIndex};
+        let compiled = self.compile(&bundle)?;
+        let mut digraph = DiGraph::default();
+        for (i, act) in compiled.iter().enumerate() {
+            digraph.add_node(act);
+            if i > 0 {
+                digraph.add_edge((i - 1).into(), i.into(), ());
+            }
+        }
+        let binding = |_, node_ref: (NodeIndex<usize>, &&Action)| {
+            node_ref.1.fmt_dot(bundle, &self.labeled_nodes)
+        };
+        let as_dot = Dot::with_attr_getters(
+            &digraph,
+            &[
+                petgraph::dot::Config::EdgeNoLabel,
+                petgraph::dot::Config::NodeNoLabel,
+            ],
+            &|_, _| format!(""),
+            &binding,
+        );
+        Some(format!("{:?}", as_dot))
+    }
+}
+pub type Executable = Vec<Action>;
 #[derive(Debug, Clone)]
 pub enum Action {
-    Op(Operation),
+    Op((Operation, usize)),
     Sync(SyncPoint),
 }
 
@@ -151,88 +230,18 @@ impl Action {
     ) {
         match self {
             Action::Op(operation) => {
-                operation.execute(device, command_buffer, bundle);
+                operation.0.execute(device, command_buffer, bundle);
             }
             Action::Sync(sync_point) => {
-                for (stages, syncs) in sync_point.sync_ops().iter() {
-                    let mut image_barriers = Vec::new();
-                    let mut buffer_barriers = Vec::new();
-                    for sync_op in syncs.iter() {
-                        match sync_op {
-                            SyncOp::Texture(
-                                texture_id,
-                                image_layout,
-                                image_layout1,
-                                _pipeline_stage_flags,
-                                _pipeline_stage_flags1,
-                                access_flags,
-                                access_flags1,
-                                _,
-                            ) => {
-                                if let Some(texture) =
-                                    bundle.texture_container.get_image(*texture_id)
-                                {
-                                    let image_aspect = if texture.texture_format().is_color() {
-                                        ImageAspectFlags::COLOR
-                                    } else if texture.texture_format().is_depth_stencil() {
-                                        ImageAspectFlags::DEPTH | ImageAspectFlags::STENCIL
-                                    } else {
-                                        ImageAspectFlags::DEPTH
-                                    };
-                                    let subresource_range = ImageSubresourceRange::default()
-                                        .level_count(1)
-                                        .layer_count(1)
-                                        .aspect_mask(image_aspect);
-                                    image_barriers.push(
-                                        ImageMemoryBarrier::default()
-                                            .image(texture.handle())
-                                            .old_layout(*image_layout)
-                                            .new_layout(*image_layout1)
-                                            .src_access_mask(*access_flags)
-                                            .dst_access_mask(*access_flags1)
-                                            .subresource_range(subresource_range),
-                                    );
-                                }
-                            }
-                            SyncOp::Buffer(
-                                general_buffer_id,
-                                _pipeline_stage_flags,
-                                _pipeline_stage_flags1,
-                                access_flags,
-                                access_flags1,
-                                offset,
-                                size,
-                                _,
-                            ) => {
-                                if let Some(buffer) = bundle
-                                    .buffer_container
-                                    .get_general_buffer(*general_buffer_id)
-                                {
-                                    buffer_barriers.push(
-                                        BufferMemoryBarrier::default()
-                                            .buffer(buffer.handle())
-                                            .offset(*offset)
-                                            .size(*size)
-                                            .src_access_mask(*access_flags)
-                                            .dst_access_mask(*access_flags1),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    unsafe {
-                        device.cmd_pipeline_barrier(
-                            command_buffer,
-                            stages.0,
-                            stages.1,
-                            DependencyFlags::empty(),
-                            &[],
-                            &buffer_barriers,
-                            &image_barriers,
-                        )
-                    };
-                }
+                sync_point.execute(device, command_buffer, bundle);
             }
+        }
+    }
+    #[cfg(feature = "graph-visualize")]
+    pub fn fmt_dot(&self, bundle: &RendererBundle, labels: &HashMap<usize, String>) -> String {
+        match self {
+            Action::Op(op) => op.0.fmt_dot(bundle, labels.get(&op.1).map(|x| x.as_str())),
+            Action::Sync(sync_point) => sync_point.fmt_dot(bundle),
         }
     }
 }
