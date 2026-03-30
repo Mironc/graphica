@@ -1,3 +1,5 @@
+//! To run this example use ```cargo run --example graph_visualize --features graph-visualize```
+
 use std::sync::Arc;
 
 use ash::vk::ImageLayout;
