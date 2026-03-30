@@ -61,7 +61,7 @@ impl PDevice {
                     )
                     .expect("Couldn't check if device supports surface")
             };
-            QueueFamily::new(x.0, x.1.clone(), is_present)
+            QueueFamily::new(x.0, *x.1, is_present)
         })
         .collect()
     }

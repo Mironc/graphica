@@ -1,7 +1,7 @@
 use ash::vk::{
     AccessFlags, AttachmentDescription, AttachmentDescriptionFlags, AttachmentLoadOp,
-    AttachmentReference, AttachmentStoreOp, ImageLayout, PipelineBindPoint, SUBPASS_EXTERNAL,
-    SampleCountFlags, SubpassDependency, SubpassDescription,
+    AttachmentReference, AttachmentStoreOp, ImageLayout, PipelineBindPoint, SampleCountFlags,
+    SubpassDescription,
 };
 use log::warn;
 use std::collections::HashMap;
@@ -22,7 +22,7 @@ impl RenderPassContainer {
         mut create: RenderPassDescription,
     ) -> Option<()> {
         let mut attachments = Vec::new();
-        for (i, attachment) in create.attachments.iter_mut().enumerate() {
+        for attachment in create.attachments.iter_mut() {
             //let new_initial_layout =
             // if matches!(attachment.load_op, LoadOption::Clear | LoadOption::DontCare) {
             //     ImageLayout::UNDEFINED
@@ -129,12 +129,12 @@ impl RenderPassContainer {
             }
             Err(e) => {
                 log::error!("error occured while creating renderpass: {}", e);
-                return None;
+                None
             }
         }
     }
     pub fn get_render_pass(&self, description: &RenderPassDescription) -> Option<&RenderPass> {
-        self.render_passes.get(&description)
+        self.render_passes.get(description)
     }
 }
 
@@ -156,7 +156,7 @@ fn optimal_image_layout(attachment: &RenderPassAttachment, usage: AttachmentUsag
             if attachment.format.is_depth() {
                 return ImageLayout::DEPTH_ATTACHMENT_OPTIMAL;
             }
-            return ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
         }
         AttachmentUsage::ReadWrite => {
             if attachment.format.is_color() {
@@ -165,7 +165,7 @@ fn optimal_image_layout(attachment: &RenderPassAttachment, usage: AttachmentUsag
             if attachment.format.is_depth() {
                 return ImageLayout::DEPTH_ATTACHMENT_OPTIMAL;
             }
-            return ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
         }
     }
 }

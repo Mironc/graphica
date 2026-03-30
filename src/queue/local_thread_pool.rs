@@ -1,5 +1,5 @@
 use ash::vk::{
-    CommandBuffer, CommandBufferAllocateInfo, CommandPool, CommandPoolCreateInfo,
+    CommandBuffer, CommandPool, CommandPoolCreateInfo,
     CommandPoolResetFlags,
 };
 

@@ -1,18 +1,16 @@
 use ash::vk::{
-    AccessFlags, BufferImageCopy, CommandBuffer, ImageAspectFlags, ImageLayout, ImageSubresource,
+    AccessFlags, BufferImageCopy, CommandBuffer, ImageAspectFlags, ImageLayout,
     ImageSubresourceLayers, Offset3D, PipelineStageFlags,
 };
 use encase::DynamicUniformBuffer;
-use image::{
-    DynamicImage, EncodableLayout, GenericImageView, RgbaImage, imageops::FilterType::Lanczos3,
-};
+use image::{EncodableLayout, RgbaImage};
 
 use crate::{
     device::DeviceContext,
     render_graph::{
         operations::draw_call::DrawCall,
-        render_graph::{ResourceAccess, ResourceState, ResourceUsage},
         resource::ResourceId,
+        resource_state::{ResourceAccess, ResourceState, ResourceUsage},
     },
     rendering::{
         buffer_container::{
@@ -20,7 +18,7 @@ use crate::{
             VertexBufferId, VertexData,
         },
         renderer_bundle::RendererBundle,
-        texture_container::{TextureId, TextureViewId},
+        texture_container::TextureId,
     },
     swapchain::FrameData,
 };
@@ -33,7 +31,7 @@ pub enum Operation {
     Present(FrameData),
 }
 impl Operation {
-    pub fn resource_state(&self, bundle: &mut RendererBundle) -> Option<Vec<ResourceState>> {
+    pub fn resource_state(&self, bundle: &RendererBundle) -> Option<Vec<ResourceState>> {
         match self {
             Operation::DrawCall(draw_call) => match draw_call {
                 DrawCall::Direct { draw_param } => draw_param.resource_state(bundle),
@@ -54,11 +52,12 @@ impl Operation {
                     .to_vec(),
                 )
             }
-            Operation::Present(frame) => {
-                let res = ResourceId::Texture(bundle.texture_container.insert_framedata(frame).0);
-                Some(
+            Operation::Present(frame) => bundle
+                .texture_container
+                .get_frameimage(frame.image())
+                .map(|tex| {
                     [ResourceState::new(
-                        res,
+                        ResourceId::Texture(tex.0),
                         ResourceUsage::Texture(
                             ImageLayout::PRESENT_SRC_KHR,
                             PipelineStageFlags::BOTTOM_OF_PIPE,
@@ -66,9 +65,8 @@ impl Operation {
                             ResourceAccess::Read,
                         ),
                     )]
-                    .to_vec(),
-                )
-            }
+                    .to_vec()
+                }),
             Operation::UploadImage(upload_image_op) => {
                 let res = ResourceId::Texture(upload_image_op.texture_id);
                 Some(
@@ -101,11 +99,68 @@ impl Operation {
             }
             Operation::Present(_) => {
                 //nothing cuz we need only to sync image
-                ()
             }
             Operation::UploadImage(upload_image_op) => {
                 upload_image_op.execute(command_buffer, bundle, device);
             }
+        }
+    }
+}
+#[cfg(feature = "graph-visualize")]
+impl Operation {
+    pub fn dot_type_label(&self) -> String {
+        match self {
+            Operation::DrawCall(_) => "DrawCall",
+            Operation::WriteBuffer(_) => "WriteBuffer",
+            Operation::UploadImage(_) => "WriteImage",
+            Operation::Present(_) => "PresentFrame",
+        }
+        .to_owned()
+    }
+    pub fn fmt_dot(&self, bundle: &RendererBundle, label: Option<&str>) -> String {
+        let type_label = self.dot_type_label();
+        let additional_info = if let Some(states) = self.resource_state(bundle) {
+            let mut reads = String::new();
+            let mut writes = String::new();
+            for state in states.iter() {
+                use std::fmt::Write;
+                match state.resource_usage().resource_access() {
+                    ResourceAccess::Read => {
+                        _ = write!(&mut reads, "{} | ", state.resource_id().fmt_dot(bundle));
+                    }
+                    ResourceAccess::Write => {
+                        _ = write!(&mut writes, "{} | ", state.resource_id().fmt_dot(bundle));
+                    }
+                    ResourceAccess::ReadWrite => {
+                        _ = write!(&mut reads, "{} | ", state.resource_id().fmt_dot(bundle));
+                        _ = write!(&mut writes, "{} | ", state.resource_id().fmt_dot(bundle));
+                    }
+                }
+            }
+            let reads = reads.trim().trim_end_matches('|');
+            let writes = writes.trim().trim_end_matches('|');
+            let mut info = String::new();
+            use std::fmt::Write;
+            if !reads.is_empty() {
+                _ = write!(&mut info, "| {{Reads | {} }}", reads);
+            }
+            if !writes.is_empty() {
+                _ = write!(&mut info, "| {{Writes | {} }}", writes);
+            }
+            info
+        } else {
+            "Failed to acquire extra info due to faulty data".to_owned()
+        };
+        if let Some(label) = label {
+            format!(
+                "shape=record, label=\"{{ {} - '{}' {} }}\"",
+                type_label, label, additional_info
+            )
+        } else {
+            format!(
+                "shape=record, label=\"{{ {} {} }}\"",
+                type_label, additional_info
+            )
         }
     }
 }
@@ -145,7 +200,7 @@ impl WriteBufferOp {
     }
     pub fn uniform_buffer<U: UniformData + encase::internal::WriteInto>(
         buff: UniformBufferId<U>,
-        mut data: Vec<U>,
+        data: Vec<U>,
         offset: u64,
     ) -> Option<Self> {
         // Writes to outside of binded memory -> return None
@@ -177,7 +232,7 @@ impl WriteBufferOp {
         if let Some(ptr) = allocation.mapped_ptr() {
             unsafe {
                 std::ptr::copy_nonoverlapping(
-                    self.data.as_ptr() as *const u8,
+                    self.data.as_ptr(),
                     ptr.as_ptr() as *mut u8,
                     size as usize,
                 );
@@ -232,7 +287,7 @@ impl UploadImageOp {
         if let Some(ptr) = allocation.mapped_ptr() {
             unsafe {
                 std::ptr::copy_nonoverlapping(
-                    data.as_ptr() as *const u8,
+                    data.as_ptr(),
                     ptr.as_ptr() as *mut u8,
                     size as usize,
                 );

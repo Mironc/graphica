@@ -1,9 +1,6 @@
 use std::sync::Arc;
 
-use ash::{
-    Device,
-    vk::{Fence, FenceCreateFlags, FenceCreateInfo, Semaphore, SemaphoreCreateInfo},
-};
+use ash::vk::{Fence, FenceCreateFlags, FenceCreateInfo, Semaphore, SemaphoreCreateInfo};
 
 use crate::device::DeviceContext;
 

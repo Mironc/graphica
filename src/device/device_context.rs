@@ -66,7 +66,7 @@ impl DeviceContext {
             allocation_sizes: Default::default(),
         };
         let alloc = Mutex::new(Allocator::new(&alloc_createinfo)?);
-        let debug_fns = debug_utils::Device::new(&context.instance(), &device);
+        let debug_fns = debug_utils::Device::new(context.instance(), &device);
         Ok(Self {
             logical_device: device,
             pdevice: pdevice.clone(),

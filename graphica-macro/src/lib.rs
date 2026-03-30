@@ -5,12 +5,12 @@ use quote::quote;
 use syn::{Data, DeriveInput, Fields, Path, parse_macro_input, parse_str};
 
 fn get_crate_root() -> proc_macro2::TokenStream {
-    match crate_name("graphics") {
+    match crate_name("graphica") {
         Ok(FoundCrate::Name(name)) => {
             let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
             quote!(::#ident)
         }
-        _ => quote!(::graphics),
+        _ => quote!(::graphica),
     }
 }
 
@@ -35,12 +35,12 @@ fn check_repr_c(input: &DeriveInput) -> Result<(), syn::Error> {
     Ok(())
 }
 fn get_encase_path() -> Path {
-    match crate_name("graphics") {
+    match crate_name("graphica") {
         Ok(FoundCrate::Name(name)) => {
             let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
             parse_str(&format!("::{}::rendering::buffer_container", ident)).unwrap()
         }
-        _ => parse_str("::graphics::rendering::buffer_container").unwrap(),
+        _ => parse_str("::graphica::rendering::buffer_container").unwrap(),
     }
 }
 #[proc_macro_attribute]

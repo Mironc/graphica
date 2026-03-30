@@ -20,7 +20,12 @@ naga = { version = "25.0.1", default-features = false, features = [
   "glsl-in",
   "spv-out",
 ] }
+petgraph = { version = "0.8.3", optional = true }
 raw-window-handle = "0.6"
 simple_logger = "5.1"
 slotmap = "1.1.1"
 winit = "0.30"
+
+[features]
+default = []
+graph-visualize = ["dep:petgraph", "petgraph/graphmap"]

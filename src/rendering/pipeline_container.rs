@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::CString;
 use std::marker::PhantomData;
@@ -43,16 +42,9 @@ impl PipelineContainer {
         let shaders = create
             .shaders
             .iter()
-            .map(|&x| shader_container.get(x))
-            .filter_map(|x| {
-                if let Some(shader) = x {
-                    return Some(shader);
-                } else {
-                    None
-                }
-            })
+            .filter_map(|&x| shader_container.get(x))
             .collect::<Vec<&Shader>>();
-        if shaders.len() == 0 {
+        if shaders.is_empty() {
             return Err(<Box<dyn Error>>::from("No shaders was provided"));
         }
         let vertex_shader = shaders
@@ -99,7 +91,7 @@ impl PipelineContainer {
             .enumerate()
             .map(|(binding, x)| {
                 VertexInputAttributeDescription::default()
-                    .binding(0)
+                    .binding(binding as u32)
                     .location(x.location() as u32)
                     .format(x.format().into_format())
                     .offset(x.offset() as u32)

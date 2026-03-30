@@ -251,7 +251,9 @@ impl winit::application::ApplicationHandler for App {
                         .value_mut()
                         .reset(device);
                     let pipeline = bundle.pipeline_container.get(pipeline_id).unwrap();
-                    let (texture, view) = bundle.texture_container.insert_framedata(&frame_data);
+                    let (texture, view) = bundle
+                        .texture_container
+                        .insert_frameimage(&frame_data.image());
 
                     let desc = &descs[frame_data.fif_id()];
                     let framebuffer_id = bundle
@@ -273,7 +275,7 @@ impl winit::application::ApplicationHandler for App {
                         ),
                     }));
                     let executor = EasyExecutor {
-                        actions: render_graph.compile(bundle).unwrap(),
+                        exec: render_graph.compile(bundle).unwrap(),
                     };
                     let command_buffer = executor.execute(device, bundle, &frame_data);
 
