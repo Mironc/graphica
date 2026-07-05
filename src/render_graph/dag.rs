@@ -43,13 +43,9 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
         self.rev_edges.push(Vec::new());
     }
     pub fn count_paths(&self, node_from: usize, node_to: usize) -> usize {
-        let mut visited = HashSet::new();
         let mut stack = vec![node_from];
         let mut count = 0;
         while let Some(current) = stack.pop() {
-            if !visited.insert(current) {
-                return 0;
-            }
             if current == node_to {
                 count += 1;
             }
@@ -59,6 +55,7 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
         }
         count
     }
+
     pub fn has_cycle(&self) -> bool {
         for node in self.nodes.iter().enumerate() {
             let mut stack = Vec::new();
@@ -71,7 +68,6 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
 
             while let Some(current_node) = stack.pop() {
                 if current_node == node.0 {
-                    println!("{} {}", current_node, node.0);
                     return true;
                 }
                 if visited.insert(current_node)

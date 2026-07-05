@@ -78,7 +78,7 @@ impl RenderGraph {
                 resource_map
                     .entry(state.resource_id())
                     .or_default()
-                    .push((node_id, state.clone()));
+                    .push((node_id, *state));
             }
         }
 

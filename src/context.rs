@@ -5,6 +5,7 @@ use winit::window::Window;
 use crate::instance::Instance;
 
 pub struct GraphicsContext {
+    #[allow(dead_code)]
     entry: Entry,
     instance: Instance,
 }

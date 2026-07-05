@@ -1,6 +1,6 @@
 use ash::vk::{AccessFlags, ImageLayout, PipelineStageFlags};
 
-use crate::{render_graph::resource::ResourceId, rendering::texture_container::TextureId};
+use crate::render_graph::resource::ResourceId;
 
 /// Represents resource state in the node and how it is used
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
