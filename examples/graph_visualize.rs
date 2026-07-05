@@ -2,19 +2,14 @@
 
 use std::sync::Arc;
 
-use ash::vk::ImageLayout;
 use graphica::context::GraphicsContext;
 use graphica::device::DeviceContext;
-use graphica::render_graph::operations::draw_call::{DrawCall, DrawGeometry, DrawParameters};
-use graphica::render_graph::operations::gpu_operation::{Operation, UploadImageOp, WriteBufferOp};
+use graphica::render_graph::operations::draw_call::{DrawCall, DrawData, DrawGeometry};
+use graphica::render_graph::operations::gpu_operation::Operation;
+use graphica::render_graph::operations::upload::{UploadBufferOp, UploadImageOp};
 use graphica::render_graph::render_graph::RenderGraph;
 use graphica::rendering::buffer_container::CreateBuffer;
-use graphica::rendering::framebuffer_container::FramebufferCreate;
 use graphica::rendering::label_container::LabelId;
-use graphica::rendering::pipeline_container::CreatePipeline;
-use graphica::rendering::render_pass_container::{
-    LoadOption, RenderPassAttachment, RenderPassDescription, StoreOption, SubPass,
-};
 use graphica::rendering::renderer_bundle::RendererBundle;
 use graphica::rendering::shader_container::ShaderType;
 use graphica::rendering::texture_container::{
@@ -56,26 +51,6 @@ impl ApplicationHandler for App {
             SwapChain::new(&shared_graphics_context, &shared_device_context, &window)
                 .expect("couldn't create swapchain");
         let mut bundle = RendererBundle::new();
-
-        let render_pass_desc = RenderPassDescription {
-            attachments: vec![
-                RenderPassAttachment::new()
-                    .format(TextureFormat::B8G8R8A8)
-                    .initial_layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                    .final_layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                    .load_op(LoadOption::Clear)
-                    .store_op(StoreOption::Store),
-            ],
-            subpass: SubPass::new(Vec::new(), vec![0], Vec::new()),
-        };
-        let _ = bundle
-            .render_pass_container
-            .create_renderpass(&shared_device_context, render_pass_desc.clone());
-        let render_pass = bundle
-            .render_pass_container
-            .get_render_pass(&render_pass_desc)
-            .cloned()
-            .unwrap();
         let vertex_shader_id = bundle
             .shader_container
             .insert(
@@ -138,22 +113,13 @@ impl ApplicationHandler for App {
             )
             .unwrap();
 
-        let pipeline_id = bundle
-            .pipeline_container
-            .create_pipeline(
-                &shared_device_context,
+        let pass_id = bundle
+            .pass_container
+            .add_pass::<()>(
                 &bundle.shader_container,
-                CreatePipeline::<()>::new()
-                    .shaders(&[vertex_shader_id, fragment_shader_id])
-                    .render_pass(&render_pass),
+                [vertex_shader_id, fragment_shader_id].to_vec(),
             )
             .unwrap();
-        let pipeline = bundle
-            .pipeline_container
-            .get(pipeline_id)
-            .unwrap()
-            .pipeline_layout()
-            .shader_layout();
         let image = image::load_from_memory(include_bytes!("Vulkan-logo.png"))
             .unwrap()
             .to_rgba8();
@@ -167,6 +133,10 @@ impl ApplicationHandler for App {
                     .dimensions(image.width(), image.height(), 1),
             )
             .unwrap();
+        // Creates label that would be used for visualization or else it would be shown as a raw id
+        bundle
+            .label_container
+            .insert_label(LabelId::Texture(texture), "InTex".to_owned());
         let texture_view = bundle
             .texture_container
             .create_texture_view(
@@ -184,9 +154,13 @@ impl ApplicationHandler for App {
                 CreateBuffer::new().len(1).staging(true),
             )
             .unwrap();
+        // Creates label that would be used for visualization or else it would be shown as a raw id
+        bundle
+            .label_container
+            .insert_label(LabelId::Buffer(*buffer), "UniformBuffer".to_owned());
         let mut descriptor_group = bundle
             .descriptor_container
-            .create_descriptor_set(&shared_device_context, pipeline.clone())
+            .create_descriptor_set(&shared_device_context, &bundle.pass_container, pass_id)
             .unwrap();
         descriptor_group.set_sampler(
             "tex_s",
@@ -204,9 +178,8 @@ impl ApplicationHandler for App {
         );
 
         let mut render_graph = RenderGraph::new();
-        println!("red");
         render_graph.add_operation(Operation::WriteBuffer(
-            WriteBufferOp::uniform_buffer(
+            UploadBufferOp::uniform_buffer(
                 buffer,
                 [PixSize {
                     x: 1.0 / (image.width() as f32),
@@ -226,25 +199,17 @@ impl ApplicationHandler for App {
             .insert_frameimage(frame_data.image());
         bundle
             .label_container
-            .insert_label(LabelId::Texture(texture), "InTex".to_owned());
-        bundle
-            .label_container
             .insert_label(LabelId::Texture(swapchain_texture), "OutTex".to_owned());
         let framebuffer_id = bundle
             .framebuffer_container
-            .insert_framebuffer(
-                &shared_device_context,
-                &bundle.texture_container,
-                FramebufferCreate::new([view].to_vec(), &render_pass),
-            )
-            .unwrap();
-        for i in 0..10 {
+            .create_framebuffer([view].to_vec());
+        for i in 0..300 {
             render_graph.add_operation_labeled(
                 Operation::DrawCall(DrawCall::Direct {
-                    draw_param: DrawParameters::new(
+                    draw_param: DrawData::new(
                         DrawGeometry::Procedural { count: 3 },
                         framebuffer_id,
-                        pipeline_id,
+                        pass_id,
                         None,
                         Some(descriptor_group.clone()),
                     ),
@@ -252,19 +217,21 @@ impl ApplicationHandler for App {
                 format!("Draw no {}", i),
             );
         }
-        render_graph.add_target_op(Operation::Present(frame_data));
-        println!("{}", render_graph.into_dot(&mut bundle));
+        render_graph.add_target_op(Operation::Present(frame_data.image().clone()));
+        let instant = std::time::Instant::now();
+        println!("{}", render_graph.into_dot(&bundle));
         if let Some(dot) = render_graph.compile_into_dot(&mut bundle) {
             println!("{}", dot);
         }
+        println!("passed: {}", instant.elapsed().as_secs_f64());
         event_loop.exit();
     }
 
     fn window_event(
         &mut self,
-        event_loop: &winit::event_loop::ActiveEventLoop,
-        window_id: winit::window::WindowId,
-        event: WindowEvent,
+        _: &winit::event_loop::ActiveEventLoop,
+        _: winit::window::WindowId,
+        _: WindowEvent,
     ) {
         ()
     }

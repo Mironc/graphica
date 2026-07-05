@@ -11,6 +11,7 @@ use crate::{
     device::DeviceContext,
     rendering::{
         buffer_container::{BufferContainer, GeneralBufferId, UniformBufferId, UniformData},
+        pass_container::{PassContainer, PassId},
         shader_container::{DescriptorBinding, ShaderLayout},
         texture_container::{SamplingOptions, TextureContainer, TextureViewId},
     },
@@ -40,8 +41,13 @@ impl DescriptorContainer {
     pub fn create_descriptor_set(
         &mut self,
         device: &DeviceContext,
-        shader_layout: ShaderLayout,
+        pass_container: &PassContainer,
+        pass_id: PassId,
     ) -> Result<DescriptorId, Box<dyn Error>> {
+        let shader_layout = pass_container
+            .get_pass(pass_id)
+            .ok_or_else(|| <Box<dyn Error>>::from(format!("No such pass with id {:?}", pass_id)))?
+            .shader_layout();
         let pool = if let Some(pool) = self
             .allocators
             .get_mut(&(std::thread::current().id(), shader_layout.bindings.clone()))

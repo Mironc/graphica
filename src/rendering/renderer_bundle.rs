@@ -4,9 +4,8 @@ use crate::{
     rendering::{
         buffer_container::BufferContainer, descriptor_container::DescriptorContainer,
         framebuffer_container::FramebufferContainer, label_container::LabelContainer,
-        pipeline_container::PipelineContainer, render_pass_container::RenderPassContainer,
-        shader_container::ShaderContainer, state_container::StateContainer,
-        texture_container::TextureContainer,
+        pass_container::PassContainer, shader_container::ShaderContainer,
+        state_container::StateContainer, texture_container::TextureContainer,
     },
     swapchain::FrameImage,
 };
@@ -16,8 +15,7 @@ pub struct RendererBundle {
     pub framebuffer_container: FramebufferContainer,
     pub shader_container: ShaderContainer,
     pub buffer_container: BufferContainer,
-    pub render_pass_container: RenderPassContainer,
-    pub pipeline_container: PipelineContainer,
+    pub pass_container: PassContainer,
     pub descriptor_container: DescriptorContainer,
     pub label_container: LabelContainer,
     pub(crate) resource_state: StateContainer,

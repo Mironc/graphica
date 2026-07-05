@@ -1,9 +1,4 @@
-use std::{
-    any::{Any, TypeId},
-    error::Error,
-    marker::PhantomData,
-    ops::Deref,
-};
+use std::{any::TypeId, error::Error, marker::PhantomData, ops::Deref};
 
 use ash::vk::{BufferCreateInfo, BufferUsageFlags, Format, SharingMode};
 use gpu_allocator::{

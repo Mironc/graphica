@@ -42,13 +42,14 @@ impl<N, E> DirectedAcyclicGraph<N, E> {
         self.edges.push(Vec::new());
         self.rev_edges.push(Vec::new());
     }
-    pub fn count_paths_to(&self, node_from: usize, node_to: usize) -> usize {
-        if self.has_cycle() {
-            return 0;
-        }
+    pub fn count_paths(&self, node_from: usize, node_to: usize) -> usize {
+        let mut visited = HashSet::new();
         let mut stack = vec![node_from];
         let mut count = 0;
         while let Some(current) = stack.pop() {
+            if !visited.insert(current) {
+                return 0;
+            }
             if current == node_to {
                 count += 1;
             }

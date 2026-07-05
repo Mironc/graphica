@@ -1,19 +1,14 @@
 use std::sync::Arc;
-use std::time::Instant;
 
-use ash::vk::{ImageLayout, PipelineStageFlags};
 use graphica::context::GraphicsContext;
 use graphica::device::DeviceContext;
 use graphica::render_graph::execution::{EasyExecutor, Executor};
-use graphica::render_graph::operations::draw_call::{DrawCall, DrawGeometry, DrawParameters};
-use graphica::render_graph::operations::gpu_operation::{Operation, UploadImageOp, WriteBufferOp};
+use graphica::render_graph::operations::draw_call::{DrawCall, DrawData, DrawGeometry};
+use graphica::render_graph::operations::gpu_operation::Operation;
+use graphica::render_graph::operations::upload::UploadImageOp;
 use graphica::render_graph::render_graph::RenderGraph;
 use graphica::rendering::descriptor_container::DescriptorId;
-use graphica::rendering::framebuffer_container::FramebufferCreate;
-use graphica::rendering::pipeline_container::{CreatePipeline, PipelineId};
-use graphica::rendering::render_pass_container::{
-    LoadOption, RenderPassAttachment, RenderPassDescription, StoreOption, SubPass,
-};
+use graphica::rendering::pass_container::PassId;
 use graphica::rendering::renderer_bundle::RendererBundle;
 use graphica::rendering::shader_container::ShaderType;
 use graphica::rendering::texture_container::{
@@ -31,9 +26,9 @@ pub struct App {
     context: Option<Arc<GraphicsContext>>,
     device_context: Option<Arc<DeviceContext>>,
     bundle: Option<RendererBundle>,
-    pipeline_id: Option<PipelineId>,
+    pass_id: Option<PassId>,
     render_graph: Option<RenderGraph>,
-    descriptor_id: Option<[DescriptorId; 2]>,
+    descriptor_id: Option<DescriptorId>,
     texture_view: Option<TextureViewId>,
 }
 impl winit::application::ApplicationHandler for App {
@@ -65,25 +60,6 @@ impl winit::application::ApplicationHandler for App {
             .expect("couldn't create swapchain");
         let mut bundle = RendererBundle::new();
 
-        let render_pass_desc = RenderPassDescription {
-            attachments: vec![
-                RenderPassAttachment::new()
-                    .format(TextureFormat::B8G8R8A8)
-                    .initial_layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                    .final_layout(ImageLayout::PRESENT_SRC_KHR)
-                    .load_op(LoadOption::Clear)
-                    .store_op(StoreOption::Store),
-            ],
-            subpass: SubPass::new(Vec::new(), vec![0], Vec::new()),
-        };
-        let _ = bundle
-            .render_pass_container
-            .create_renderpass(&shared_device_context, render_pass_desc.clone());
-        let render_pass = bundle
-            .render_pass_container
-            .get_render_pass(&render_pass_desc)
-            .cloned()
-            .unwrap();
         let vertex_shader_id = bundle
             .shader_container
             .insert(
@@ -122,24 +98,13 @@ impl winit::application::ApplicationHandler for App {
                 ShaderType::Fragment,
             )
             .unwrap();
-
-        let pipeline_id = bundle
-            .pipeline_container
-            .create_pipeline(
-                &shared_device_context,
+        let pass_id = bundle
+            .pass_container
+            .add_pass::<()>(
                 &bundle.shader_container,
-                CreatePipeline::<()>::new()
-                    .shaders(&[vertex_shader_id, fragment_shader_id])
-                    .render_pass(&render_pass),
+                [fragment_shader_id, vertex_shader_id].to_vec(),
             )
             .unwrap();
-        let pipeline = bundle
-            .pipeline_container
-            .get(pipeline_id)
-            .unwrap()
-            .pipeline_layout()
-            .shader_layout();
-
         let texture = bundle
             .texture_container
             .create_texture(
@@ -161,7 +126,7 @@ impl winit::application::ApplicationHandler for App {
 
         let mut descriptor_group = bundle
             .descriptor_container
-            .create_descriptor_set(&shared_device_context, pipeline.clone())
+            .create_descriptor_set(&shared_device_context, &bundle.pass_container, pass_id)
             .unwrap();
         descriptor_group.set_sampler(
             "tex_s",
@@ -173,25 +138,6 @@ impl winit::application::ApplicationHandler for App {
         bundle.descriptor_container.apply_changes(
             &shared_device_context,
             &descriptor_group,
-            &bundle.buffer_container,
-            &mut bundle.texture_container,
-        );
-
-        let mut descriptor_group_2 = bundle
-            .descriptor_container
-            .create_descriptor_set(&shared_device_context, pipeline.clone())
-            .unwrap();
-        descriptor_group_2.set_sampler(
-            "tex_s",
-            SamplingOptions::new()
-                .filter(graphica::rendering::texture_container::Filter::Point)
-                .wrap(graphica::rendering::texture_container::WrapOption::Repeat),
-        );
-        descriptor_group_2.set_texture("tex", texture_view);
-
-        bundle.descriptor_container.apply_changes(
-            &shared_device_context,
-            &descriptor_group_2,
             &bundle.buffer_container,
             &mut bundle.texture_container,
         );
@@ -208,8 +154,8 @@ impl winit::application::ApplicationHandler for App {
         self.swapchain = Some(swapchain);
         self.bundle = Some(bundle);
         self.render_graph = Some(render_graph);
-        self.pipeline_id = Some(pipeline_id);
-        self.descriptor_id = Some([descriptor_group, descriptor_group_2]);
+        self.pass_id = Some(pass_id);
+        self.descriptor_id = Some(descriptor_group);
         self.texture_view = Some(texture_view);
     }
 
@@ -236,7 +182,7 @@ impl winit::application::ApplicationHandler for App {
                     &self.device_context,
                     &mut self.swapchain,
                     &mut self.bundle,
-                    self.pipeline_id,
+                    self.pass_id,
                     &mut self.render_graph,
                     &mut self.descriptor_id,
                 ) {
@@ -250,23 +196,17 @@ impl winit::application::ApplicationHandler for App {
                         .get_commandpool(device, &frame_data)
                         .value_mut()
                         .reset(device);
-                    let pipeline = bundle.pipeline_container.get(pipeline_id).unwrap();
                     let (texture, view) = bundle
                         .texture_container
                         .insert_frameimage(&frame_data.image());
 
-                    let desc = &descs[frame_data.fif_id()];
+                    let desc = descs;
                     let framebuffer_id = bundle
                         .framebuffer_container
-                        .insert_framebuffer(
-                            device,
-                            &bundle.texture_container,
-                            FramebufferCreate::new([view].to_vec(), pipeline.render_pass()),
-                        )
-                        .unwrap();
+                        .create_framebuffer([view].to_vec());
 
-                    render_graph.add_target_op(Operation::DrawCall(DrawCall::Direct {
-                        draw_param: DrawParameters::new(
+                    render_graph.add_operation(Operation::DrawCall(DrawCall::Direct {
+                        draw_param: DrawData::new(
                             DrawGeometry::Procedural { count: 3 },
                             framebuffer_id,
                             pipeline_id,
@@ -274,9 +214,11 @@ impl winit::application::ApplicationHandler for App {
                             Some(desc.clone()),
                         ),
                     }));
+                    render_graph.add_target_op(Operation::Present(frame_data.image().clone()));
                     let executor = EasyExecutor {
                         exec: render_graph.compile(bundle).unwrap(),
                     };
+
                     let command_buffer = executor.execute(device, bundle, &frame_data);
 
                     render_graph.clear();
