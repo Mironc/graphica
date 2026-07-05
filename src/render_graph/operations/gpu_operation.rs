@@ -4,6 +4,7 @@ use crate::{
     device::DeviceContext,
     render_graph::{
         operations::{
+            custom::CustomOp,
             draw_call::DrawCall,
             upload::{UploadBufferOp, UploadImageOp},
         },
@@ -14,12 +15,13 @@ use crate::{
     swapchain::FrameImage,
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Operation {
     DrawCall(DrawCall),
     WriteBuffer(UploadBufferOp),
     UploadImage(UploadImageOp),
     Present(FrameImage),
+    Custom(Box<dyn CustomOp>),
 }
 impl Operation {
     pub fn resource_state(&self, bundle: &RendererBundle) -> Option<Vec<ResourceState>> {
@@ -43,6 +45,7 @@ impl Operation {
                 })
             }
             Operation::UploadImage(upload_image_op) => upload_image_op.resource_state(bundle),
+            Operation::Custom(op) => op.resource_state(bundle),
         }
     }
     pub fn execute(
@@ -64,6 +67,9 @@ impl Operation {
             Operation::UploadImage(upload_image_op) => {
                 upload_image_op.execute(command_buffer, bundle, device);
             }
+            Operation::Custom(custom_op) => {
+                custom_op.execute(device, command_buffer, bundle);
+            }
         }
     }
 }
@@ -75,6 +81,7 @@ impl Operation {
             Operation::WriteBuffer(_) => "WriteBuffer",
             Operation::UploadImage(_) => "WriteImage",
             Operation::Present(_) => "PresentFrame",
+            Operation::Custom(_) => "Custom",
         }
         .to_owned()
     }

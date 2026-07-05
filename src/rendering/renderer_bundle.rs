@@ -3,9 +3,10 @@ use crate::{
     render_graph::resource::ResourceId,
     rendering::{
         buffer_container::BufferContainer, descriptor_container::DescriptorContainer,
-        framebuffer_container::FramebufferContainer, label_container::LabelContainer,
-        pass_container::PassContainer, shader_container::ShaderContainer,
-        state_container::StateContainer, texture_container::TextureContainer,
+        framebuffer_container::FramebufferContainer, global_variables::GlobalVariables,
+        label_container::LabelContainer, pass_container::PassContainer,
+        shader_container::ShaderContainer, state_container::StateContainer,
+        texture_container::TextureContainer,
     },
     swapchain::FrameImage,
 };
@@ -18,7 +19,8 @@ pub struct RendererBundle {
     pub pass_container: PassContainer,
     pub descriptor_container: DescriptorContainer,
     pub label_container: LabelContainer,
-    pub(crate) resource_state: StateContainer,
+    pub resource_state: StateContainer,
+    pub global_variables: GlobalVariables,
 }
 impl RendererBundle {
     pub fn new() -> Self {
