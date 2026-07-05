@@ -115,11 +115,11 @@ impl SyncPoint {
                     transition
                         .resource_state_from()
                         .resource_usage()
-                        .pipeline_stage(),
+                        .pipeline_stage_from(),
                     transition
                         .resource_state_to()
                         .resource_usage()
-                        .pipeline_stage(),
+                        .pipeline_stage_from(),
                 ))
                 .or_default();
             entry.push(transition);
@@ -220,7 +220,9 @@ impl SyncOp {
                 image_layout,
                 _,
                 pipeline_stage_flags,
+                _,
                 access_flags,
+                _,
                 access,
             ),
         ) = (new_state.resource_id(), new_state.resource_usage())
@@ -265,7 +267,9 @@ impl SyncOp {
                         _,
                         image_layout,
                         pipeline_stage_flags,
+                        _,
                         access_flags,
+                        _,
                         _,
                     ),
                     ResourceUsage::Texture(
@@ -277,7 +281,9 @@ impl SyncOp {
                     | ResourceUsage::TextureTranstional(
                         image_layout_1,
                         _,
+                        _,
                         pipeline_stage_flags_1,
+                        _,
                         access_flags_1,
                         access,
                     ),
@@ -414,7 +420,7 @@ impl SyncOp {
                     format!("")
                 };
                 let content = format!("{} {} {}", image_layout, pipe_stage, access);
-                let trimmed = content.trim_start_matches("|").trim_end();
+                let trimmed = content.trim_start_matches(" | ").trim_end();
                 if !trimmed.is_empty() {
                     format!("{} | {}", label, trimmed)
                 } else {

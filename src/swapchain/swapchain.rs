@@ -1,43 +1,39 @@
-use std::{error::Error, sync::Arc};
+use std::error::Error;
 
 use ash::{
     khr::swapchain,
-    vk::{
-        self, Extent2D, Fence,
-        SwapchainKHR,
-    },
+    vk::{self, Extent2D, Fence, SwapchainKHR},
 };
 use winit::window::Window;
 
 use crate::{
     context::GraphicsContext,
     device::DeviceContext,
-    queue::logical_queue::Queue,
     swapchain::{FrameImage, ImageSync, frame_data::FrameData, frame_sync::FrameSync},
 };
 
-///Hardcoded count of frames in flight
-const FIF_COUNT: usize = 2;
 pub struct SwapChain {
     device: swapchain::Device,
-    device_context: Arc<DeviceContext>,
     swapchain_khr: SwapchainKHR,
     current_frame: usize,
+    fif_count: usize,
     syncs: Vec<FrameSync>,
     frames: Vec<FrameImage>,
 }
 impl SwapChain {
     pub fn new(
-        context: &Arc<GraphicsContext>,
-        device_context: &Arc<DeviceContext>,
+        context: &GraphicsContext,
+        device_context: &DeviceContext,
         window: &Window,
+        fif_count: usize,
     ) -> Result<Self, Box<dyn Error>> {
-        Self::create_swapchain(context, device_context, window, None)
+        Self::create_swapchain(context, device_context, window, fif_count, None)
     }
     fn create_swapchain(
-        context: &Arc<GraphicsContext>,
-        device_context: &Arc<DeviceContext>,
+        context: &GraphicsContext,
+        device_context: &DeviceContext,
         window: &Window,
+        fif_count: usize,
         previous: Option<&Self>,
     ) -> Result<Self, Box<dyn Error>> {
         let formats = device_context.pdevice().surface_formats();
@@ -72,13 +68,14 @@ impl SwapChain {
             } else {
                 let min = capabilities.min_image_extent;
                 let max = capabilities.max_image_extent;
-                let width = window.inner_size().width.min(max.width).max(min.width);
-                let height = window.inner_size().height.min(max.height).max(min.height);
+                let width = window.inner_size().width.min(max.width).max(max.width);
+                let height = window.inner_size().height.min(min.height).max(max.height);
+                log::info!("{:?} {:?}", min, max);
                 Extent2D { width, height }
             }
         };
 
-        let image_count = capabilities.min_image_count.max(3);
+        let image_count = capabilities.min_image_count.max((fif_count + 1) as u32);
         log::debug!(
             "Swapchain format: {:?} present mode: {:?}  extent: {:?} image count: {:?}",
             format_khr,
@@ -148,7 +145,7 @@ impl SwapChain {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let syncs = (0..FIF_COUNT)
+        let syncs = (0..fif_count)
             .map(|_| FrameSync::new(device_context))
             .collect::<Vec<FrameSync>>();
         let frames = (0..image_count as usize)
@@ -167,9 +164,9 @@ impl SwapChain {
         Ok(Self {
             device: sdevice,
             swapchain_khr,
-            device_context: device_context.clone(),
             current_frame: 0,
             frames,
+            fif_count,
             syncs,
         })
     }
@@ -177,8 +174,8 @@ impl SwapChain {
     ///Recreates swapchain
     pub fn recreate(
         &mut self,
-        context: &Arc<GraphicsContext>,
-        device_context: &Arc<DeviceContext>,
+        context: &GraphicsContext,
+        device_context: &DeviceContext,
         window: &Window,
     ) -> Result<Self, Box<dyn Error>> {
         unsafe {
@@ -186,14 +183,18 @@ impl SwapChain {
                 .device_wait_idle()
                 .expect("Panic on idle wait");
             for frame in self.frames.iter() {
-                self.device_context
-                    .destroy_image_view(frame.image_view(), None);
+                device_context.destroy_image_view(frame.image_view(), None);
                 device_context.destroy_semaphore(frame.image_sync().render_finished(), None);
             }
             self.syncs.iter().for_each(|x| x.destroy(device_context));
             let swapchain_khr_handle = self.swapchain_khr;
-            let new_swapchain =
-                Self::create_swapchain(context, device_context, window, Some(self))?;
+            let new_swapchain = Self::create_swapchain(
+                context,
+                device_context,
+                window,
+                self.fif_count,
+                Some(self),
+            )?;
             new_swapchain
                 .device
                 .destroy_swapchain(swapchain_khr_handle, None);
@@ -222,7 +223,7 @@ impl SwapChain {
                 .expect("Couldn't acquire next image");
             res.0
         };
-        self.current_frame = (self.current_frame + 1) % FIF_COUNT;
+        self.current_frame = (self.current_frame + 1) % self.fif_count;
         current_sync.clear(device_context);
         FrameData::new(
             self.current_frame,
@@ -233,7 +234,7 @@ impl SwapChain {
     ///This call presents frame on the screen with framedata
     pub fn present_frame(
         &self,
-        present_queue: &Queue,
+        device_context: &DeviceContext,
         frame_data: FrameData,
     ) -> Result<(), Box<dyn Error>> {
         let image_indices = [frame_data.image().image_id()];
@@ -245,8 +246,10 @@ impl SwapChain {
             .image_indices(&image_indices);
 
         unsafe {
-            self.device
-                .queue_present(present_queue.handle(), &present_info)?
+            self.device.queue_present(
+                device_context.render_queue().present_queue().handle(),
+                &present_info,
+            )?
         };
         Ok(())
     }

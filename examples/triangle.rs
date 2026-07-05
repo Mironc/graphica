@@ -1,21 +1,14 @@
-use std::sync::Arc;
-
-use ash::vk::ImageLayout;
 use graphica::context::GraphicsContext;
 use graphica::device::DeviceContext;
-use graphica::render_graph::execution::{EasyExecutor, Executor};
-use graphica::render_graph::operations::draw_call::{DrawCall, DrawGeometry, DrawParameters};
+use graphica::render_graph::execution::{Executor, SimpleExecutor};
+use graphica::render_graph::operations::draw_call::{DrawCall, DrawData, DrawGeometry};
 use graphica::render_graph::operations::gpu_operation::Operation;
 use graphica::render_graph::render_graph::RenderGraph;
-use graphica::rendering::framebuffer_container::FramebufferCreate;
-use graphica::rendering::pipeline_container::{CreatePipeline, PipelineId};
-use graphica::rendering::render_pass_container::{
-    LoadOption, RenderPassAttachment, RenderPassDescription, StoreOption, SubPass,
-};
+use graphica::rendering::pass_container::PassId;
 use graphica::rendering::renderer_bundle::RendererBundle;
 use graphica::rendering::shader_container::ShaderType;
-use graphica::rendering::texture_container::TextureFormat;
 use graphica::swapchain::SwapChain;
+use std::sync::Arc;
 use winit::event::WindowEvent;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowAttributes};
@@ -27,7 +20,7 @@ pub struct App {
     context: Option<Arc<GraphicsContext>>,
     device_context: Option<Arc<DeviceContext>>,
     bundle: Option<RendererBundle>,
-    pipeline_id: Option<PipelineId>,
+    pass_id: Option<PassId>,
     render_graph: Option<RenderGraph>,
 }
 impl winit::application::ApplicationHandler for App {
@@ -55,29 +48,11 @@ impl winit::application::ApplicationHandler for App {
         let shared_graphics_context = Arc::new(graphics_context);
         let shared_device_context = Arc::new(device_context);
 
-        let swapchain = SwapChain::new(&shared_graphics_context, &shared_device_context, &window)
-            .expect("couldn't create swapchain");
+        let swapchain =
+            SwapChain::new(&shared_graphics_context, &shared_device_context, &window, 1)
+                .expect("couldn't create swapchain");
         let mut bundle = RendererBundle::new();
 
-        let render_pass_desc = RenderPassDescription {
-            attachments: vec![
-                RenderPassAttachment::new()
-                    .format(TextureFormat::B8G8R8A8)
-                    .initial_layout(ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                    .final_layout(ImageLayout::PRESENT_SRC_KHR)
-                    .load_op(LoadOption::Clear)
-                    .store_op(StoreOption::Store),
-            ],
-            subpass: SubPass::new(Vec::new(), vec![0], Vec::new()),
-        };
-        let _ = bundle
-            .render_pass_container
-            .create_renderpass(&shared_device_context, render_pass_desc.clone());
-        let render_pass = bundle
-            .render_pass_container
-            .get_render_pass(&render_pass_desc)
-            .cloned()
-            .unwrap();
         let vertex_shader_id = bundle
             .shader_container
             .insert(
@@ -118,33 +93,23 @@ impl winit::application::ApplicationHandler for App {
                 ShaderType::Fragment,
             )
             .unwrap();
-
-        let pipeline_id = bundle
-            .pipeline_container
-            .create_pipeline(
-                &shared_device_context,
+        let pass_id = bundle
+            .pass_container
+            .add_pass::<()>(
                 &bundle.shader_container,
-                CreatePipeline::<()>::new()
-                    .shaders(&[vertex_shader_id, fragment_shader_id])
-                    .render_pass(&render_pass),
+                [vertex_shader_id, fragment_shader_id].to_vec(),
             )
             .unwrap();
-        let pipeline = bundle
-            .pipeline_container
-            .get(pipeline_id)
-            .unwrap()
-            .pipeline_layout()
-            .shader_layout();
-        let mut render_graph = RenderGraph::new();
+        let render_graph = RenderGraph::new();
         self.window = Some(window);
         self.context = Some(shared_graphics_context);
         self.device_context = Some(shared_device_context);
         self.swapchain = Some(swapchain);
         self.bundle = Some(bundle);
         self.render_graph = Some(render_graph);
-        self.pipeline_id = Some(pipeline_id);
+        self.pass_id = Some(pass_id);
     }
-    fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+    fn about_to_wait(&mut self, _: &winit::event_loop::ActiveEventLoop) {
         self.window.as_ref().map(|x| x.request_redraw());
     }
     fn window_event(
@@ -169,7 +134,7 @@ impl winit::application::ApplicationHandler for App {
                     &self.device_context,
                     &mut self.swapchain,
                     &mut self.bundle,
-                    self.pipeline_id,
+                    self.pass_id,
                     &mut self.render_graph,
                 ) {
                     let device = context;
@@ -179,24 +144,18 @@ impl winit::application::ApplicationHandler for App {
                     device
                         .render_queue()
                         .graphics_queue()
-                        .get_commandpool(device, &frame_data)
+                        .get_localcommandpool(device, &frame_data)
                         .value_mut()
                         .reset(device);
-                    let pipeline = bundle.pipeline_container.get(pipeline_id).unwrap();
-                    let (texture, view) = bundle
+                    let (_, view) = bundle
                         .texture_container
                         .insert_frameimage(&frame_data.image());
                     let framebuffer_id = bundle
                         .framebuffer_container
-                        .insert_framebuffer(
-                            device,
-                            &bundle.texture_container,
-                            FramebufferCreate::new([view].to_vec(), pipeline.render_pass()),
-                        )
-                        .unwrap();
+                        .create_framebuffer([view].to_vec());
 
-                    render_graph.add_target_op(Operation::DrawCall(DrawCall::Direct {
-                        draw_param: DrawParameters::new(
+                    render_graph.add_operation(Operation::DrawCall(DrawCall::Direct {
+                        draw_param: DrawData::new(
                             DrawGeometry::Procedural { count: 3 },
                             framebuffer_id,
                             pipeline_id,
@@ -204,11 +163,11 @@ impl winit::application::ApplicationHandler for App {
                             None,
                         ),
                     }));
-                    let executor = EasyExecutor {
+                    render_graph.add_target_op(Operation::Present(frame_data.image().clone()));
+                    let executor = SimpleExecutor {
                         exec: render_graph.compile(bundle).unwrap(),
                     };
                     let command_buffer = executor.execute(device, bundle, &frame_data);
-
                     render_graph.clear();
                     let wait_semaphores = [frame_sync.image_available()];
                     let signal_semaphores = [frame_data.image().image_sync().render_finished()];
@@ -228,9 +187,8 @@ impl winit::application::ApplicationHandler for App {
                             )
                             .expect("Error while submiting");
                     }
-                    let present_queue = context.render_queue().present_queue();
                     swapchain
-                        .present_frame(present_queue, frame_data)
+                        .present_frame(&device, frame_data)
                         .expect("Couldn't present image");
                 }
             }
@@ -264,7 +222,7 @@ impl App {
             } else {
                 log::debug!("New swapchain!");
                 Some(
-                    SwapChain::new(graphics_context, device_context, window)
+                    SwapChain::new(graphics_context, device_context, window, 1)
                         .expect("Error while recreating swapchain"),
                 )
             };

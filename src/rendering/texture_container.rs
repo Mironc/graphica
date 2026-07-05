@@ -1,9 +1,9 @@
 use std::{collections::HashMap, error::Error};
 
 use ash::vk::{
-    Extent3D, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout, ImageSubresourceRange,
-    ImageTiling, ImageType, ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType,
-    SampleCountFlags, SamplerAddressMode, SamplerCreateInfo,
+    self, Extent3D, Format, Image, ImageAspectFlags, ImageCreateInfo, ImageLayout,
+    ImageSubresourceRange, ImageTiling, ImageType, ImageUsageFlags, ImageView, ImageViewCreateInfo,
+    ImageViewType, SampleCountFlags, SamplerAddressMode, SamplerCreateInfo,
 };
 use gpu_allocator::{
     MemoryLocation,
@@ -11,10 +11,7 @@ use gpu_allocator::{
 };
 use slotmap::{SlotMap, new_key_type};
 
-use crate::{
-    device::DeviceContext,
-    swapchain::{FrameData, FrameImage},
-};
+use crate::{device::DeviceContext, swapchain::FrameImage};
 
 /// Centralized container for managing all that related to textures, but not array of textures
 #[derive(Debug, Default)]
@@ -168,9 +165,11 @@ impl TextureContainer {
         );
         (texture_id, texture_view_id)
     }
+
     pub fn get_frameimage(&self, frame_image: &FrameImage) -> Option<&(TextureId, TextureViewId)> {
         self.swapchain_frame.get(frame_image)
     }
+
     pub fn remove_frameimage(
         &mut self,
         frame_image: &FrameImage,
@@ -185,6 +184,27 @@ impl TextureContainer {
             None
         }
     }
+
+    pub fn insert_image(
+        &mut self,
+        image: vk::Image,
+        dimensions: (u32, u32),
+        format: Format,
+    ) -> TextureId {
+        let texture = Texture {
+            image,
+            alloc: Allocation::default(),
+            image_type: ImageType::TYPE_2D,
+            extent: Extent3D {
+                width: dimensions.0,
+                height: dimensions.1,
+                depth: 1,
+            },
+            texture_format: TextureFormat::Swapchain(format),
+        };
+        self.images.insert(texture)
+    }
+
     pub(crate) fn get_sampler(
         &mut self,
         device: &DeviceContext,
@@ -361,6 +381,7 @@ pub enum TextureFormat {
     R8G8,
     Depth32F,
     Depth24Stencil8,
+    #[doc(hidden)]
     Swapchain(Format),
 }
 impl TextureFormat {
@@ -393,11 +414,11 @@ impl TextureFormat {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Sampler {
-    handle: ash::vk::Sampler,
+    handle: vk::Sampler,
 }
 
 impl Sampler {
-    pub fn handle(&self) -> ash::vk::Sampler {
+    pub fn handle(&self) -> vk::Sampler {
         self.handle
     }
 }
@@ -432,10 +453,10 @@ pub enum Filter {
     Linear,
 }
 impl Filter {
-    pub fn into_vk_filter(&self) -> ash::vk::Filter {
+    pub fn into_vk_filter(&self) -> vk::Filter {
         match self {
-            Filter::Point => ash::vk::Filter::NEAREST,
-            Filter::Linear => ash::vk::Filter::LINEAR,
+            Filter::Point => vk::Filter::NEAREST,
+            Filter::Linear => vk::Filter::LINEAR,
         }
     }
 }

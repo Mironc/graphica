@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::CString;
 use std::marker::PhantomData;
@@ -18,29 +19,47 @@ use slotmap::SlotMap;
 
 use crate::device::DeviceContext;
 use crate::rendering::buffer_container::VertexData;
-use crate::rendering::render_pass_container::RenderPass;
+use crate::rendering::render_pass_container::{RenderPass, RenderPassId};
 use crate::rendering::shader_container::{
     Shader, ShaderContainer, ShaderId, ShaderLayout, ShaderType,
 };
 
+use super::buffer_container::VertexAttribute;
+
 #[derive(Default)]
 pub struct PipelineContainer {
-    pipelines: SlotMap<PipelineId, Pipeline>,
+    pipeline_layouts: SlotMap<PipelineId, (Vec<ShaderId>, Vec<Vec<VertexAttribute>>, usize)>,
+    pipelines: HashMap<(PipelineId, PipelineOptions, RenderPass), Pipeline>,
 }
 impl PipelineContainer {
     pub fn new() -> Self {
-        Self {
-            pipelines: SlotMap::default(),
-        }
+        Self::default()
     }
-    pub fn create_pipeline<V: VertexData>(
+    pub fn create_pipeline_layout<V: VertexData>(&mut self, shaders: Vec<ShaderId>) -> PipelineId {
+        let info = V::layout_info();
+        self.pipeline_layouts
+            .insert((shaders, info, size_of::<V>()))
+    }
+    pub fn get_concrete_pipeline(
         &mut self,
         device: &DeviceContext,
         shader_container: &ShaderContainer,
-        create: CreatePipeline<V>,
-    ) -> Result<PipelineId, Box<dyn Error>> {
-        let shaders = create
-            .shaders
+        pipeline_options: PipelineOptions,
+        render_pass: RenderPass,
+        id: PipelineId,
+    ) -> Result<&Pipeline, Box<dyn Error>> {
+        let key = (id, pipeline_options, render_pass);
+        if self.pipelines.contains_key(&key) {
+            return Ok(self.pipelines.get(&key).unwrap());
+        }
+        let (id, pipeline_options, render_pass) = key;
+
+        let (shaders, vertex_layout, vertex_size) = self
+            .pipeline_layouts
+            .get(id)
+            .ok_or_else(|| <Box<dyn Error>>::from("No such PipelineId"))?;
+
+        let shaders = shaders
             .iter()
             .filter_map(|&x| shader_container.get(x))
             .collect::<Vec<&Shader>>();
@@ -79,19 +98,13 @@ impl PipelineContainer {
             .module(fragment_module)
             .name(&entry_point_name);
         let shader_states_infos = [vertex_shader_state_info, fragment_shader_state_info];
-        let vertex_layout = V::layout_info();
 
         let vertex_attribute_descs = vertex_layout
-            .into_iter()
-            .fold(Vec::new(), |mut acc, mut x| {
-                acc.append(&mut x);
-                acc
-            })
-            .into_iter()
-            .enumerate()
-            .map(|(binding, x)| {
+            .iter()
+            .flatten()
+            .map(|x| {
                 VertexInputAttributeDescription::default()
-                    .binding(binding as u32)
+                    .binding(0)
                     .location(x.location() as u32)
                     .format(x.format().into_format())
                     .offset(x.offset() as u32)
@@ -100,7 +113,7 @@ impl PipelineContainer {
         let vertex_binding_descs = if !vertex_attribute_descs.is_empty() {
             [VertexInputBindingDescription::default()
                 .binding(0)
-                .stride(size_of::<V>() as _)
+                .stride(*vertex_size as u32)
                 .input_rate(VertexInputRate::VERTEX)]
             .to_vec()
         } else {
@@ -156,7 +169,7 @@ impl PipelineContainer {
 
         let layout = {
             let mut desc_layouts = combined_layout.descriptor_layouts(device);
-            desc_layouts.sort_by(|x, x1| x.0.cmp(&x1.0));
+            desc_layouts.sort_by_key(|x| x.0);
             let layouts = desc_layouts
                 .iter()
                 .map(|x| x.1)
@@ -184,10 +197,6 @@ impl PipelineContainer {
             pipeline_layout: layout,
             shader_layout: combined_layout,
         };
-
-        let render_pass = create
-            .render_pass
-            .ok_or_else(|| <Box<dyn Error>>::from("No renderpass is set"))?;
 
         let dynamic_states = [DynamicState::VIEWPORT, DynamicState::SCISSOR];
         let dynamic_states_createinfo =
@@ -232,10 +241,11 @@ impl PipelineContainer {
             pipeline_layout,
             render_pass: render_pass.clone(),
         };
-        Ok(self.pipelines.insert(pipeline))
-    }
-    pub fn get(&self, pipeline_id: PipelineId) -> Option<&Pipeline> {
-        self.pipelines.get(pipeline_id)
+        let entry = self
+            .pipelines
+            .entry((id, pipeline_options, render_pass))
+            .or_insert(pipeline);
+        Ok(entry)
     }
 }
 slotmap::new_key_type! {pub struct PipelineId;}
@@ -260,29 +270,29 @@ impl Pipeline {
     }
 }
 #[derive(Debug, Clone)]
-pub struct CreatePipeline<'a, V: VertexData> {
-    render_pass: Option<&'a RenderPass>,
-    shaders: &'a [ShaderId],
+pub struct CreatePipeline<V: VertexData> {
+    render_pass: Option<RenderPassId>,
+    shaders: Vec<ShaderId>,
     _marker: PhantomData<V>,
 }
-impl<'a, V> CreatePipeline<'a, V>
+impl<V> CreatePipeline<V>
 where
     V: VertexData,
 {
-    pub fn new() -> CreatePipeline<'a, V> {
+    pub fn new() -> CreatePipeline<V> {
         CreatePipeline::default()
     }
-    pub fn render_pass(mut self, render_pass: &'a RenderPass) -> Self {
+    pub fn render_pass(mut self, render_pass: RenderPassId) -> Self {
         self.render_pass = Some(render_pass);
         self
     }
-    pub fn shaders(mut self, shaders: &'a [ShaderId]) -> Self {
+    pub fn shaders(mut self, shaders: Vec<ShaderId>) -> Self {
         self.shaders = shaders;
         self
     }
 }
 
-impl<'a, V> Default for CreatePipeline<'a, V>
+impl<V> Default for CreatePipeline<V>
 where
     V: VertexData,
 {
@@ -309,3 +319,6 @@ impl PipelineLayout {
         &self.shader_layout
     }
 }
+// TODO: add options Depth test, stencil test, blending, cullface etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PipelineOptions {}

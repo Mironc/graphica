@@ -25,9 +25,9 @@ impl ResourceState {
         match (from.resource_usage, to.resource_usage) {
             (
                 ResourceUsage::Texture(i1, _, _, _)
-                | ResourceUsage::TextureTranstional(i1, _, _, _, _),
+                | ResourceUsage::TextureTranstional(i1, _, _, _, _, _, _),
                 ResourceUsage::Texture(i2, _, _, _)
-                | ResourceUsage::TextureTranstional(i2, _, _, _, _),
+                | ResourceUsage::TextureTranstional(i2, _, _, _, _, _, _),
             ) => i1 != i2,
             _ => false,
         }
@@ -48,6 +48,8 @@ pub enum ResourceUsage {
         ImageLayout,
         ImageLayout,
         PipelineStageFlags,
+        PipelineStageFlags,
+        AccessFlags,
         AccessFlags,
         ResourceAccess,
     ),
@@ -59,14 +61,21 @@ impl ResourceUsage {
     pub fn resource_access(&self) -> ResourceAccess {
         *match self {
             ResourceUsage::Texture(_, _, _, resource_access)
-            | ResourceUsage::TextureTranstional(_, _, _, _, resource_access)
+            | ResourceUsage::TextureTranstional(_, _, _, _, _, _, resource_access)
             | ResourceUsage::Buffer(_, _, _, _, resource_access) => resource_access,
         }
     }
-    pub fn pipeline_stage(&self) -> PipelineStageFlags {
+    pub fn pipeline_stage_from(&self) -> PipelineStageFlags {
         *match self {
             ResourceUsage::Texture(_, ps, _, _)
-            | ResourceUsage::TextureTranstional(_, _, ps, _, _)
+            | ResourceUsage::TextureTranstional(_, _, ps, _, _, _, _)
+            | ResourceUsage::Buffer(ps, _, _, _, _) => ps,
+        }
+    }
+    pub fn pipeline_stage_to(&self) -> PipelineStageFlags {
+        *match self {
+            ResourceUsage::Texture(_, ps, _, _)
+            | ResourceUsage::TextureTranstional(_, _, _, ps, _, _, _)
             | ResourceUsage::Buffer(ps, _, _, _, _) => ps,
         }
     }
@@ -78,7 +87,7 @@ pub enum ResourceAccess {
     ReadWrite,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateTransition {
     resource_state_from: ResourceState,
     resource_state_to: ResourceState,
@@ -92,18 +101,21 @@ impl StateTransition {
     }
     pub fn sync_makes_sense(&self) -> bool {
         if let (
-            ResourceUsage::Texture(_, _, _, _),
-            ResourceUsage::TextureTranstional(layout, _, _, _, _),
+            ResourceUsage::Texture(_, _, _, _)
+            | ResourceUsage::TextureTranstional(_, _, _, _, _, _, _),
+            ResourceUsage::TextureTranstional(_, _, _, _, _, _, _),
         ) = (
             self.resource_state_from.resource_usage(),
             self.resource_state_to.resource_usage(),
-        ) && layout == ImageLayout::UNDEFINED
-        {
+        ) {
             return false;
         }
         self.resource_state_to.resource_id() == self.resource_state_from.resource_id()
-            && (self.resource_state_from.resource_usage().pipeline_stage()
-                != self.resource_state_to.resource_usage().pipeline_stage()
+            && (self
+                .resource_state_from
+                .resource_usage()
+                .pipeline_stage_from()
+                != self.resource_state_to.resource_usage().pipeline_stage_to()
                 || (self.resource_state_from.resource_usage().resource_access()
                     != ResourceAccess::Read
                     || self.resource_state_to.resource_usage().resource_access()
@@ -115,7 +127,8 @@ impl StateTransition {
     }
     pub fn edge_makes_sense(from: &ResourceState, to: &ResourceState) -> bool {
         to.resource_id() == from.resource_id()
-            && (from.resource_usage().pipeline_stage() != to.resource_usage().pipeline_stage()
+            && (from.resource_usage().pipeline_stage_from()
+                != to.resource_usage().pipeline_stage_from()
                 || (from.resource_usage().resource_access() != ResourceAccess::Read
                     || to.resource_usage().resource_access() != ResourceAccess::Read)
                 || ResourceState::image_layout_differs(from, to))

@@ -1,7 +1,9 @@
 pub mod buffer_container;
 pub mod descriptor_container;
 pub mod framebuffer_container;
+pub mod global_variables;
 pub mod label_container;
+pub mod pass_container;
 pub mod pipeline_container;
 pub mod render_pass_container;
 pub mod renderer_bundle;

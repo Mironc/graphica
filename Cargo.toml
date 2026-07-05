@@ -5,26 +5,24 @@ edition = "2024"
 license = "Apache-2.0"
 
 [dependencies]
+anymap = "0.12.1"
 ash = "0.38"
 ash-window = "0.13"
 dashmap = "6.1.0"
+dyn-clone = "1.0.2"
 encase = "0.12"
-gpu-allocator = { version = "0.28.0", default-features = false, features = [
-  "std",
-  "vulkan",
-] }
+gpu-allocator = { version = "0.28.0", default-features = false, features = ["std", "vulkan"] }
 graphica-macro = { path = "graphica-macro" }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 log = "0.4"
-naga = { version = "25.0.1", default-features = false, features = [
-  "glsl-in",
-  "spv-out",
-] }
+naga = { version = "25.0.1", default-features = false, features = ["glsl-in", "spv-out"] }
 petgraph = { version = "0.8.3", optional = true }
 raw-window-handle = "0.6"
-simple_logger = "5.1"
 slotmap = "1.1.1"
 winit = "0.30"
+
+[dev-dependencies]
+simple_logger = "5.1"
 
 [features]
 default = []

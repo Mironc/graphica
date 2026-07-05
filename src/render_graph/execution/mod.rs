@@ -4,10 +4,7 @@ use ash::vk::{CommandBuffer, CommandBufferBeginInfo, DebugUtilsLabelEXT};
 
 use crate::{
     device::DeviceContext,
-    render_graph::{
-        operations::{draw_call::DrawCall, gpu_operation::Operation},
-        render_graph::{Action, Executable},
-    },
+    render_graph::render_graph::{Action, Executable},
     rendering::renderer_bundle::RendererBundle,
     swapchain::FrameData,
 };
@@ -21,10 +18,10 @@ pub trait Executor {
     ) -> CommandBuffer;
 }
 #[derive(Debug, Clone)]
-pub struct EasyExecutor {
+pub struct SimpleExecutor {
     pub exec: Executable,
 }
-impl Executor for EasyExecutor {
+impl Executor for SimpleExecutor {
     fn execute(
         &self,
         device: &DeviceContext,
@@ -34,7 +31,7 @@ impl Executor for EasyExecutor {
         let command_buffer = device
             .render_queue()
             .graphics_queue()
-            .get_commandpool(device, frame_data)
+            .get_localcommandpool(device, frame_data)
             .get_buffer(device);
         let label_str = CString::from_str("Graph pass").unwrap();
         let _debug_label = DebugUtilsLabelEXT::default()
@@ -49,10 +46,8 @@ impl Executor for EasyExecutor {
             //     .debug_fns()
             //     .cmd_begin_debug_utils_label(command_buffer, &debug_label);
             for action in self.exec.iter() {
-                // println!("executed:{:?}", action);
-                if let Action::Op((Operation::DrawCall(DrawCall::Direct { draw_param }), _)) =
-                    &action
-                    && let Some(new_states) = draw_param.resource_state(bundle)
+                if let Action::Op((op, _)) = action
+                    && let Some(new_states) = op.resource_state(bundle)
                 {
                     for new_state in new_states {
                         last_state.insert(new_state.resource_id(), new_state);

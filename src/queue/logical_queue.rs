@@ -1,6 +1,6 @@
 use std::thread::ThreadId;
 
-use ash::vk::Queue as Q;
+use ash::vk::{CommandPoolCreateInfo, Queue as Q};
 use dashmap::{DashMap, mapref::one::RefMut};
 
 use super::{local_thread_pool::LocalCommandPool, queue_family::QueueFamily};
@@ -27,8 +27,8 @@ impl Queue {
         self.raw_queue
     }
 
-    ///Gives you command pool that's made for your fif and thread
-    pub fn get_commandpool(
+    /// Gives you command pool that's dedicated for fif and thread
+    pub fn get_localcommandpool(
         &self,
         logical_device: &DeviceContext,
         frame_data: &FrameData,
@@ -37,6 +37,14 @@ impl Queue {
         self.command_pools
             .entry((frame_data.fif_id(), thread_id))
             .or_insert_with(|| LocalCommandPool::new(logical_device, self.queue_family))
+    }
+
+    ///
+    pub fn create_commandpool(&self, logical_device: &DeviceContext) -> ash::vk::CommandPool {
+        let commandpool_createinfo =
+            CommandPoolCreateInfo::default().queue_family_index(self.queue_family.id() as u32);
+        unsafe { logical_device.create_command_pool(&commandpool_createinfo, None) }
+            .expect("Couldn't create command pool")
     }
     pub fn queue_family(&self) -> &QueueFamily {
         &self.queue_family

@@ -1,11 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{
-    render_graph::resource::ResourceId,
-    rendering::{
-        buffer_container::GeneralBufferId, framebuffer_container::FramebufferId,
-        texture_container::TextureId,
-    },
+use crate::rendering::{
+    buffer_container::GeneralBufferId, framebuffer_container::FramebufferId,
+    texture_container::TextureId,
 };
 
 #[derive(Debug, Default)]

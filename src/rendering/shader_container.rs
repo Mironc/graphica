@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::ops::Deref;
 
 use ash::vk::{self, DescriptorPoolSize, PushConstantRange};
 use encase::internal::BufferMut;
-use naga::AddressSpace;
 use naga::back::spv::PipelineOptions;
+use naga::{AddressSpace, TypeInner};
 use slotmap::SlotMap;
 
 #[derive(Debug, Default)]
@@ -27,7 +28,7 @@ impl ShaderContainer {
         let module = parser
             .parse(&options, shader_source)
             .map_err(|e| eprintln!("{}", e.emit_to_string(shader_source)))
-            .unwrap();
+            .expect("Error while parsing:");
 
         let options = naga::back::spv::Options::default();
         let module_info = naga::valid::Validator::new(
@@ -41,15 +42,52 @@ impl ShaderContainer {
         .unwrap();
 
         // Reflection
-        let mut shader_layout = ShaderLayout {
-            bindings: Vec::new(),
-            name_to_bind: HashMap::new(),
-            push_constants: Vec::new(),
-            name_to_push: HashMap::new(),
-        };
+        let mut shader_layout = ShaderLayout::new();
+
+        if shader_type == ShaderType::Fragment {
+            for ep in module.entry_points.iter() {
+                if let Some(res) = ep.function.result.as_ref() {
+                    if let naga::TypeInner::Struct { members, span: _ } =
+                        &module.types[res.ty].inner
+                    {
+                        for member in members.iter() {
+                            if let Some(naga::Binding::Location {
+                                location,
+                                interpolation: _,
+                                sampling: _,
+                                blend_src: _,
+                            }) = member.binding
+                            {
+                                if let TypeInner::Vector { size: _, scalar } =
+                                    &module.types[member.ty].inner
+                                {
+                                    let ty = match scalar.kind {
+                                        naga::ScalarKind::Sint => DataType::Int,
+                                        naga::ScalarKind::Uint => DataType::UInt,
+                                        naga::ScalarKind::Float => DataType::Float,
+                                        _ => {
+                                            unreachable!("Output type of shader")
+                                        }
+                                    };
+                                    shader_layout
+                                        .output_types
+                                        .types
+                                        .insert((shader_type, location), ty);
+                                }
+                            }
+                        }
+                    }
+                    log::debug!(
+                        "entry point: {:?} named {} with res type {:?}",
+                        res,
+                        ep.name,
+                        module.types[res.ty]
+                    );
+                }
+            }
+        }
         for (_handle, variable) in module.global_variables.iter() {
             if let Some(binding) = &variable.binding {
-                let _naga_ty = module.types[variable.ty].clone();
                 let ty = match variable.space {
                     AddressSpace::Uniform => Some(vk::DescriptorType::UNIFORM_BUFFER),
                     AddressSpace::Storage { access: _ } => Some(vk::DescriptorType::STORAGE_BUFFER),
@@ -60,17 +98,18 @@ impl ShaderContainer {
                                 arrayed: _,
                                 class,
                             } => match class {
-                                naga::ImageClass::Sampled { kind: _, multi: _ } => {
+                                naga::ImageClass::Sampled { kind: _, multi: _ }
+                                | naga::ImageClass::Depth { multi: _ } => {
                                     vk::DescriptorType::SAMPLED_IMAGE
                                 }
-                                naga::ImageClass::Depth { multi: _ } => {
-                                    vk::DescriptorType::SAMPLED_IMAGE
-                                }
-                                naga::ImageClass::Storage { format: _, access: _ } => {
-                                    vk::DescriptorType::STORAGE_IMAGE
-                                }
+                                naga::ImageClass::Storage {
+                                    format: _,
+                                    access: _,
+                                } => vk::DescriptorType::STORAGE_IMAGE,
                             },
-                            naga::TypeInner::Sampler { comparison: _ } => vk::DescriptorType::SAMPLER,
+                            naga::TypeInner::Sampler { comparison: _ } => {
+                                vk::DescriptorType::SAMPLER
+                            }
                             naga::TypeInner::BindingArray { base: _, size: _ } => todo!(),
                             _ => unreachable!(), //in theory
                         }
@@ -91,12 +130,12 @@ impl ShaderContainer {
             }
             if let AddressSpace::PushConstant = &variable.space {
                 let naga_ty = module.types[variable.ty].clone();
-                println!("Found push_constant {:?}", &naga_ty);
+                log::trace!("Found push_constant {:?}", &naga_ty);
                 let mut fields = Vec::new();
                 match &naga_ty.inner {
                     naga::TypeInner::Struct { members, span: _ } => {
                         for field in members.iter() {
-                            println!("encountered field:{:?}", module.types[field.ty]);
+                            log::trace!("encountered field:{:?}", module.types[field.ty]);
                             if let Some(name) = &field.name {
                                 let size = module.types[field.ty].inner.size(module.to_ctx());
                                 fields.push((name.clone(), field.offset, size));
@@ -128,7 +167,7 @@ impl ShaderContainer {
                 }
             }
         }
-        println!("{:?}", shader_layout);
+        log::trace!("{:?}", shader_layout);
 
         //writing as spir-v
         let mut source_spv = vec![];
@@ -177,7 +216,7 @@ impl Shader {
         &self.source
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShaderType {
     Vertex,
     Fragment,
@@ -199,7 +238,12 @@ impl ShaderType {
         }
     }
 }
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataType {
+    UInt,
+    Int,
+    Float,
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DescriptorBinding {
     pub set: u32,
@@ -218,6 +262,7 @@ pub struct ShaderLayout {
     name_to_bind: HashMap<String, DescriptorBinding>,
     pub push_constants: Vec<PushConstantRange>,
     name_to_push: HashMap<String, usize>,
+    pub output_types: OutputTypes,
 }
 impl ShaderLayout {
     pub fn new() -> Self {
@@ -226,6 +271,7 @@ impl ShaderLayout {
             name_to_bind: HashMap::new(),
             push_constants: Vec::new(),
             name_to_push: HashMap::new(),
+            output_types: OutputTypes::default(),
         }
     }
     pub fn descriptor_layouts(&self, device: &ash::Device) -> Vec<(u32, vk::DescriptorSetLayout)> {
@@ -275,6 +321,7 @@ impl ShaderLayout {
         let mut push_constants = self.push_constants.clone();
         let mut name_bind = self.name_to_bind.clone();
         let mut name_push = self.name_to_push.clone();
+        let mut output_types = self.output_types.clone();
 
         for other_binding in other.bindings.iter() {
             if let Some(binding) = bindings.get_mut(other_binding.binding as usize) {
@@ -312,12 +359,16 @@ impl ShaderLayout {
         for a in other.name_to_push.iter() {
             name_push.insert(a.0.clone(), *a.1);
         }
+        for a in other.output_types.iter() {
+            output_types.types.insert(*a.0, *a.1);
+        }
 
         Some(Self {
             bindings,
             name_to_bind: name_bind,
             push_constants,
             name_to_push: name_push,
+            output_types,
         })
     }
     pub fn add_descriptor(&mut self, desc_bind: DescriptorBinding, name: String) {
@@ -344,7 +395,40 @@ impl ShaderLayout {
             buf: [0; 128],
         }
     }
+
+    pub fn output_types(&self) -> &OutputTypes {
+        &self.output_types
+    }
 }
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutputTypes {
+    pub types: HashMap<(ShaderType, u32), DataType>,
+}
+impl OutputTypes {
+    pub fn new(types: HashMap<(ShaderType, u32), DataType>) -> Self {
+        Self { types }
+    }
+    /// Checks if two  are compatible to share one RenderPass with
+    pub fn attachments_compatible(&self, other: &OutputTypes) -> bool {
+        let vec = other
+            .types
+            .iter()
+            .filter(|x| x.0.0 == ShaderType::Fragment)
+            .collect::<Vec<(&(ShaderType, u32), &DataType)>>();
+        self.types
+            .iter()
+            .filter(|x| x.0.0 == ShaderType::Fragment)
+            .all(|x| vec.contains(&x))
+    }
+}
+impl Deref for OutputTypes {
+    type Target = HashMap<(ShaderType, u32), DataType>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.types
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PushWriter {
     pub push_constants: Vec<PushConstantRange>,

@@ -7,7 +7,8 @@ use crate::{
     render_graph::{
         dag::DirectedAcyclicGraph,
         operations::gpu_operation::Operation,
-        resource_state::StateTransition,
+        resource::ResourceId,
+        resource_state::{ResourceState, StateTransition},
         sync::{SyncOp, SyncPoint},
     },
     rendering::renderer_bundle::RendererBundle,
@@ -62,85 +63,136 @@ impl RenderGraph {
     }
     /// Creates edges in graph based on whetever operation writes into resources that are used by other operation
     fn fill_in(&mut self, bundle: &RendererBundle) {
-        let nodes = self.dag.nodes().clone();
+        // Contains all nodes resource states
+        let all_node_states: Vec<Vec<ResourceState>> = self
+            .dag
+            .nodes()
+            .iter()
+            .map(|n| n.resource_state(bundle).unwrap_or_default())
+            .collect();
 
+        // Contains all states of resource in nodes
+        let mut resource_map: HashMap<ResourceId, Vec<(usize, ResourceState)>> = HashMap::new();
+        for (node_id, states) in all_node_states.iter().enumerate() {
+            for state in states {
+                resource_map
+                    .entry(state.resource_id())
+                    .or_default()
+                    .push((node_id, *state));
+            }
+        }
+
+        // TODO: Refactor this and create a better algo if there's any
         // Start from the op node, and goes down
         let mut stack = vec![self.target_node];
         let mut visited = std::collections::HashSet::new();
         visited.insert(self.target_node);
+
         while let Some(current_id) = stack.pop() {
-            let current_node = nodes.get(current_id).unwrap();
-            for (node_id, node) in nodes.iter().enumerate() {
-                if node_id == current_id || self.dag.has_edge(node_id, current_id) {
-                    continue;
-                }
-                if node_id > current_id {
-                    log::debug!("Break");
-                    break;
-                }
-                let initial_resource_state = node.resource_state(bundle);
-                let final_resource_state = current_node.resource_state(bundle);
-                if let (Some(initial_resource_state), Some(final_resource_state)) =
-                    (initial_resource_state, final_resource_state)
-                {
-                    let result = initial_resource_state
-                        .into_iter()
-                        .filter_map(|x| {
-                            final_resource_state
-                                .iter()
-                                .find(|y| StateTransition::edge_makes_sense(&x, y))
-                                .map(|y| StateTransition::new(x, *y))
-                        })
-                        .collect::<Vec<StateTransition>>();
-                    if !result.is_empty() {
-                        if visited.insert(node_id) {
-                            stack.push(node_id);
+            let current_states = &all_node_states[current_id];
+
+            for state_to in current_states.iter() {
+                let res_id = state_to.resource_id();
+                if let Some(potential_producers) = resource_map.get(&res_id) {
+                    for (prev_id, state_from) in potential_producers.iter() {
+                        if *prev_id >= current_id {
+                            break;
                         }
-                        self.dag.add_edge_cyclic(node_id, current_id, result);
+                        if StateTransition::edge_makes_sense(state_from, state_to) {
+                            let transition = StateTransition::new(*state_from, *state_to);
+                            self.dag
+                                .add_edge_cyclic(*prev_id, current_id, vec![transition]);
+
+                            if visited.insert(*prev_id) {
+                                stack.push(*prev_id);
+                            }
+                        }
                     }
                 }
             }
         }
     }
+
     /// This function is the main feature of render graph
     ///
     /// It finishes graph, culls unused branches, orders operations and includes synchronization points
     pub fn compile(&mut self, bundle: &RendererBundle) -> Option<Executable> {
         self.fill_in(bundle);
+
         //Removes nodes that are not influencing on target nodes and makes topological sort (linearizing operation order)
         let compiled = self.dag.compile(self.target_node)?;
 
+        let mut ops = Vec::with_capacity(compiled.len());
+        for &i in compiled.iter() {
+            let node = self.dag.get_node(i).cloned()?;
+            ops.push(node);
+        }
+        let mut last_states = HashMap::new();
+        // Finds all draw passes and looks for
+        // Might be useful to use hashmap<resource_id,vec<(node_idx,state)>>, so it can be used to lookup next and previous state faster with bin search
+        let mut sync_passes = HashMap::new();
+        for (idx, node) in ops.iter().enumerate() {
+            let states = node.resource_state(bundle)?;
+            if let Operation::DrawCall(_) = &node {
+                let mut transitions = Vec::new();
+                'outer: for state in states.iter() {
+                    // check cached state of resources
+                    let prev_state = if let Some(s) = last_states.get(&state.resource_id()) {
+                        *s
+                    } else {
+                        bundle.resource_state.get_or_default(state.resource_id())
+                    };
+                    // Go to next nodes and sort out next state
+                    for i in idx + 1..ops.len() {
+                        let next_states = ops[i].resource_state(bundle)?;
+                        if let Some(next_state) = next_states
+                            .iter()
+                            .find(|x| x.resource_id() == state.resource_id())
+                        {
+                            transitions.push((prev_state, Some(*next_state)));
+                            continue 'outer;
+                        }
+                        transitions.push((prev_state, None));
+                    }
+                }
+                sync_passes.insert(idx, transitions);
+            }
+            states.iter().for_each(|x| {
+                last_states.insert(x.resource_id(), *x);
+            });
+        }
+
+        for (idx, transitions) in sync_passes.into_iter() {
+            if let Operation::DrawCall(draw_data) = &mut ops[idx] {
+                draw_data.insert_sync(transitions);
+            }
+        }
+
         let mut last_state = HashMap::new();
         let mut actions = Vec::with_capacity(compiled.len());
-        for x in compiled {
-            let node = self.dag.get_node(x).cloned().unwrap();
-            let pre_sync = node.resource_state(bundle).as_ref().unwrap().iter().fold(
-                SyncPoint::default(),
-                |mut acc, &x| {
-                    if let Some(last) = last_state.get(&x.resource_id()) {
-                        let transition = StateTransition::new(*last, x);
-                        if transition.sync_makes_sense() {
-                            let sync_op = SyncOp::from_transition(&transition);
-                            acc.push_sync_op(sync_op);
-                        }
-                    } else if let Some(resource_state) = bundle.resource_state.get(x.resource_id())
-                    {
-                        let transition = StateTransition::new(resource_state, x);
-                        if transition.sync_makes_sense() {
-                            let sync_op = SyncOp::from_transition(&transition);
-                            acc.push_sync_op(sync_op);
-                        }
-                    } else {
-                        acc.push_sync_op(SyncOp::from_unitialized(x));
+        for (idx, node) in ops.into_iter().enumerate() {
+            let mut pre_sync = SyncPoint::default();
+            for &x in node.resource_state(bundle).as_ref()?.iter() {
+                if let Some(last) = last_state.get(&x.resource_id()) {
+                    let transition = StateTransition::new(*last, x);
+                    if transition.sync_makes_sense() {
+                        let sync_op = SyncOp::from_transition(&transition);
+                        pre_sync.push_sync_op(sync_op);
                     }
-                    last_state.insert(x.resource_id(), x);
-                    acc
-                },
-            );
+                } else {
+                    let resource_state = bundle.resource_state.get_or_default(x.resource_id());
+                    let transition = StateTransition::new(resource_state, x);
+                    if transition.sync_makes_sense() {
+                        let sync_op = SyncOp::from_transition(&transition);
+                        pre_sync.push_sync_op(sync_op);
+                    }
+                }
+                last_state.insert(x.resource_id(), x);
+            }
             if !pre_sync.is_empty() {
                 actions.push(Action::Sync(pre_sync));
             }
-            actions.push(Action::Op((node, x)));
+            actions.push(Action::Op((node, idx)));
         }
         Some(actions)
     }
@@ -166,8 +218,7 @@ impl RenderGraph {
         }
         for (i, node) in render_graph.edges().iter().enumerate() {
             for (to, _) in node.iter() {
-                let paths = render_graph.count_paths_to(i, *to);
-                println!("{}", paths);
+                let paths = render_graph.count_paths(i, *to);
                 if paths == 1 {
                     graph.add_edge(i.into(), (*to).into(), ());
                 }
@@ -183,7 +234,7 @@ impl RenderGraph {
                 petgraph::dot::Config::EdgeNoLabel,
                 petgraph::dot::Config::NodeNoLabel,
             ],
-            &|_, edge_ref| format!(""),
+            &|_, _| format!(""),
             &binding,
         );
         format!("{:?}", as_dot)
