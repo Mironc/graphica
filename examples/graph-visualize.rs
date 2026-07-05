@@ -1,5 +1,8 @@
 //! To run this example use ```cargo run --example graph_visualize --features graph-visualize```
-
+//!
+//! This example shows how graph looks like as a structure in .dot format
+//! Prints out
+//!
 use std::sync::Arc;
 
 use graphica::context::GraphicsContext;
@@ -9,6 +12,7 @@ use graphica::render_graph::operations::gpu_operation::Operation;
 use graphica::render_graph::operations::upload::{UploadBufferOp, UploadImageOp};
 use graphica::render_graph::render_graph::RenderGraph;
 use graphica::rendering::buffer_container::CreateBuffer;
+use graphica::rendering::descriptor_container::DescriptorWriter;
 use graphica::rendering::label_container::LabelId;
 use graphica::rendering::renderer_bundle::RendererBundle;
 use graphica::rendering::shader_container::ShaderType;
@@ -48,7 +52,7 @@ impl ApplicationHandler for App {
         let shared_device_context = Arc::new(device_context);
 
         let mut swapchain =
-            SwapChain::new(&shared_graphics_context, &shared_device_context, &window)
+            SwapChain::new(&shared_graphics_context, &shared_device_context, &window, 1)
                 .expect("couldn't create swapchain");
         let mut bundle = RendererBundle::new();
         let vertex_shader_id = bundle
@@ -158,24 +162,15 @@ impl ApplicationHandler for App {
         bundle
             .label_container
             .insert_label(LabelId::Buffer(*buffer), "UniformBuffer".to_owned());
-        let mut descriptor_group = bundle
-            .descriptor_container
-            .create_descriptor_set(&shared_device_context, &bundle.pass_container, pass_id)
-            .unwrap();
+        let mut descriptor_group = DescriptorWriter::default();
         descriptor_group.set_sampler(
-            "tex_s",
+            "tex_s".to_owned(),
             SamplingOptions::new()
                 .filter(Filter::Linear)
                 .wrap(WrapOption::Repeat),
         );
-        descriptor_group.set_texture("tex", texture_view);
-        descriptor_group.set_uniform_buffer("ud", buffer);
-        bundle.descriptor_container.apply_changes(
-            &shared_device_context,
-            &descriptor_group,
-            &bundle.buffer_container,
-            &mut bundle.texture_container,
-        );
+        descriptor_group.set_texture("tex".to_owned(), texture_view);
+        descriptor_group.set_uniform_buffer("ud".to_owned(), buffer);
 
         let mut render_graph = RenderGraph::new();
         render_graph.add_operation(Operation::WriteBuffer(
@@ -203,7 +198,7 @@ impl ApplicationHandler for App {
         let framebuffer_id = bundle
             .framebuffer_container
             .create_framebuffer([view].to_vec());
-        for i in 0..300 {
+        for i in 0..3 {
             render_graph.add_operation_labeled(
                 Operation::DrawCall(DrawCall::Direct {
                     draw_param: DrawData::new(
@@ -219,7 +214,6 @@ impl ApplicationHandler for App {
         }
         render_graph.add_target_op(Operation::Present(frame_data.image().clone()));
         let instant = std::time::Instant::now();
-        println!("{}", render_graph.into_dot(&bundle));
         if let Some(dot) = render_graph.compile_into_dot(&mut bundle) {
             println!("{}", dot);
         }

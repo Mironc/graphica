@@ -12,11 +12,11 @@ use crate::{
     },
     rendering::{
         buffer_container::GeneralBufferId,
-        descriptor_container::{BindedRes, DescriptorId},
+        descriptor_container::{BindedRes, DescriptorWriter},
         framebuffer_container::FramebufferId,
         pass_container::PassId,
         renderer_bundle::RendererBundle,
-        shader_container::PushWriter,
+        shader_container::{PushWriter, ShaderType},
     },
 };
 
@@ -42,7 +42,7 @@ impl DrawCall {
     }
     pub fn draw_data(&self) -> &DrawData {
         match self {
-            DrawCall::Direct { draw_param } => &draw_param,
+            DrawCall::Direct { draw_param } => draw_param,
         }
     }
     pub fn draw_pass(&self) -> &DrawPass {
@@ -90,7 +90,7 @@ pub struct DrawData {
     framebuffer: FramebufferId,
     pass: DrawPass,
     push_buf: Option<[u8; 128]>,
-    desc: Option<DescriptorId>,
+    desc: Option<DescriptorWriter>,
 }
 impl DrawData {
     pub fn new(
@@ -98,7 +98,7 @@ impl DrawData {
         framebuffer: FramebufferId,
         pass: PassId,
         push_writer: Option<&PushWriter>,
-        desc: Option<DescriptorId>,
+        desc: Option<DescriptorWriter>,
     ) -> Self {
         Self {
             geometry,
@@ -117,7 +117,13 @@ impl DrawData {
 
         // renderpass attachments
         let layout = bundle.pass_container.get_pass(self.pass.pass_id())?;
-        for (&index, _) in layout.shader_layout().output_types.iter() {
+
+        for (&(_, index), _) in layout
+            .shader_layout()
+            .output_types()
+            .iter()
+            .filter(|x| x.0.0 == ShaderType::Fragment)
+        {
             let view_id = view_ids.get(index as usize)?;
             let texture = bundle.texture_container.get_image(view_id.texture())?;
             let resource_id = ResourceId::Texture(view_id.texture());
@@ -237,10 +243,14 @@ impl DrawData {
         }
 
         // descriptor sets write
-        if let Some(desc) = &self.desc
-            && let Some(descriptor_sets) = bundle.descriptor_container.get_descriptor(desc.id())
+        if let Some(writer) = &self.desc
+            && let Ok(binded) = bundle.descriptor_container.binded_res(
+                writer,
+                &bundle.pass_container,
+                self.pass.pass_id(),
+            )
         {
-            for (desc_bind, bind) in descriptor_sets.binded().iter() {
+            for (desc_bind, bind) in binded.iter() {
                 let res_state = match bind {
                     BindedRes::Buffer(general_buffer_id, offset, size) => {
                         let bind_point = shader_to_pipeline_stage(desc_bind.stage_flags);
@@ -329,13 +339,7 @@ impl DrawData {
         };
         let framebuffer = bundle
             .framebuffer_container
-            .get_concrete_framebuffer(
-                device,
-                &bundle.texture_container,
-                self.framebuffer,
-                &pass,
-                self.pass.pass_id(),
-            )
+            .get_concrete_framebuffer(device, &bundle.texture_container, self.framebuffer, &pass)
             .expect("Couldn't create concrete framebuffer");
         let pipeline = pass.pipeline();
         let _view_ids = framebuffer.views_id();
@@ -393,8 +397,15 @@ impl DrawData {
                     &push_buf,
                 );
             }
-            if let Some(desc_id) = &self.desc
-                && let Some(descriptor) = bundle.descriptor_container.get_descriptor(desc_id.id())
+            if let Some(desc_writer) = &self.desc
+                && let Ok(descriptor) = bundle.descriptor_container.get_descriptor_group(
+                    desc_writer,
+                    device,
+                    &bundle.pass_container,
+                    self.pass.pass_id(),
+                    &mut bundle.texture_container,
+                    &bundle.buffer_container,
+                )
                 && !descriptor.binded().is_empty()
             {
                 device.cmd_bind_descriptor_sets(

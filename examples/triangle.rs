@@ -1,6 +1,6 @@
 use graphica::context::GraphicsContext;
 use graphica::device::DeviceContext;
-use graphica::render_graph::execution::{EasyExecutor, Executor};
+use graphica::render_graph::execution::{Executor, SimpleExecutor};
 use graphica::render_graph::operations::draw_call::{DrawCall, DrawData, DrawGeometry};
 use graphica::render_graph::operations::gpu_operation::Operation;
 use graphica::render_graph::render_graph::RenderGraph;
@@ -48,8 +48,9 @@ impl winit::application::ApplicationHandler for App {
         let shared_graphics_context = Arc::new(graphics_context);
         let shared_device_context = Arc::new(device_context);
 
-        let swapchain = SwapChain::new(&shared_graphics_context, &shared_device_context, &window)
-            .expect("couldn't create swapchain");
+        let swapchain =
+            SwapChain::new(&shared_graphics_context, &shared_device_context, &window, 1)
+                .expect("couldn't create swapchain");
         let mut bundle = RendererBundle::new();
 
         let vertex_shader_id = bundle
@@ -143,7 +144,7 @@ impl winit::application::ApplicationHandler for App {
                     device
                         .render_queue()
                         .graphics_queue()
-                        .get_commandpool(device, &frame_data)
+                        .get_localcommandpool(device, &frame_data)
                         .value_mut()
                         .reset(device);
                     let (_, view) = bundle
@@ -163,7 +164,7 @@ impl winit::application::ApplicationHandler for App {
                         ),
                     }));
                     render_graph.add_target_op(Operation::Present(frame_data.image().clone()));
-                    let executor = EasyExecutor {
+                    let executor = SimpleExecutor {
                         exec: render_graph.compile(bundle).unwrap(),
                     };
                     let command_buffer = executor.execute(device, bundle, &frame_data);
@@ -186,9 +187,8 @@ impl winit::application::ApplicationHandler for App {
                             )
                             .expect("Error while submiting");
                     }
-                    let present_queue = context.render_queue().present_queue();
                     swapchain
-                        .present_frame(present_queue, frame_data)
+                        .present_frame(&device, frame_data)
                         .expect("Couldn't present image");
                 }
             }
@@ -222,7 +222,7 @@ impl App {
             } else {
                 log::debug!("New swapchain!");
                 Some(
-                    SwapChain::new(graphics_context, device_context, window)
+                    SwapChain::new(graphics_context, device_context, window, 1)
                         .expect("Error while recreating swapchain"),
                 )
             };

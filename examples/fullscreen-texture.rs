@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use graphica::context::GraphicsContext;
 use graphica::device::DeviceContext;
-use graphica::render_graph::execution::{EasyExecutor, Executor};
+use graphica::render_graph::execution::{Executor, SimpleExecutor};
 use graphica::render_graph::operations::draw_call::{DrawCall, DrawData, DrawGeometry};
 use graphica::render_graph::operations::gpu_operation::Operation;
 use graphica::render_graph::operations::upload::UploadImageOp;
 use graphica::render_graph::render_graph::RenderGraph;
-use graphica::rendering::descriptor_container::DescriptorId;
+use graphica::rendering::descriptor_container::DescriptorWriter;
 use graphica::rendering::pass_container::PassId;
 use graphica::rendering::renderer_bundle::RendererBundle;
 use graphica::rendering::shader_container::ShaderType;
@@ -28,7 +28,7 @@ pub struct App {
     bundle: Option<RendererBundle>,
     pass_id: Option<PassId>,
     render_graph: Option<RenderGraph>,
-    descriptor_id: Option<DescriptorId>,
+    descriptor_id: Option<DescriptorWriter>,
     texture_view: Option<TextureViewId>,
 }
 impl winit::application::ApplicationHandler for App {
@@ -56,8 +56,9 @@ impl winit::application::ApplicationHandler for App {
         let shared_graphica_context = Arc::new(graphics_context);
         let shared_device_context = Arc::new(device_context);
 
-        let swapchain = SwapChain::new(&shared_graphica_context, &shared_device_context, &window)
-            .expect("couldn't create swapchain");
+        let swapchain =
+            SwapChain::new(&shared_graphica_context, &shared_device_context, &window, 1)
+                .expect("couldn't create swapchain");
         let mut bundle = RendererBundle::new();
 
         let vertex_shader_id = bundle
@@ -86,10 +87,6 @@ impl winit::application::ApplicationHandler for App {
 
             layout(set = 0, binding = 0) uniform sampler tex_s;
             layout(set = 0, binding = 1) uniform texture2D tex;
-
-            float lum(vec3 color){
-                return dot(color, vec3(0.3,0.59,0.11));
-            }
 
             void main() {
                 vec4 fetched_color = texture(sampler2D(tex, tex_s), uv).rgba;
@@ -124,23 +121,14 @@ impl winit::application::ApplicationHandler for App {
             )
             .unwrap();
 
-        let mut descriptor_group = bundle
-            .descriptor_container
-            .create_descriptor_set(&shared_device_context, &bundle.pass_container, pass_id)
-            .unwrap();
-        descriptor_group.set_sampler(
-            "tex_s",
+        let mut writer = DescriptorWriter::default();
+        writer.set_sampler(
+            "tex_s".to_owned(),
             SamplingOptions::new()
                 .filter(graphica::rendering::texture_container::Filter::Linear)
                 .wrap(graphica::rendering::texture_container::WrapOption::Repeat),
         );
-        descriptor_group.set_texture("tex", texture_view);
-        bundle.descriptor_container.apply_changes(
-            &shared_device_context,
-            &descriptor_group,
-            &bundle.buffer_container,
-            &mut bundle.texture_container,
-        );
+        writer.set_texture("tex".to_owned(), texture_view);
 
         let mut render_graph = RenderGraph::new();
         let image = image::load_from_memory(include_bytes!("Vulkan-logo.png"))
@@ -155,7 +143,7 @@ impl winit::application::ApplicationHandler for App {
         self.bundle = Some(bundle);
         self.render_graph = Some(render_graph);
         self.pass_id = Some(pass_id);
-        self.descriptor_id = Some(descriptor_group);
+        self.descriptor_id = Some(writer);
         self.texture_view = Some(texture_view);
     }
 
@@ -193,10 +181,10 @@ impl winit::application::ApplicationHandler for App {
                     device
                         .render_queue()
                         .graphics_queue()
-                        .get_commandpool(device, &frame_data)
+                        .get_localcommandpool(device, &frame_data)
                         .value_mut()
                         .reset(device);
-                    let (texture, view) = bundle
+                    let (_, view) = bundle
                         .texture_container
                         .insert_frameimage(&frame_data.image());
 
@@ -215,7 +203,7 @@ impl winit::application::ApplicationHandler for App {
                         ),
                     }));
                     render_graph.add_target_op(Operation::Present(frame_data.image().clone()));
-                    let executor = EasyExecutor {
+                    let executor = SimpleExecutor {
                         exec: render_graph.compile(bundle).unwrap(),
                     };
 
@@ -240,9 +228,8 @@ impl winit::application::ApplicationHandler for App {
                             )
                             .expect("Error while submiting");
                     }
-                    let present_queue = context.render_queue().present_queue();
                     swapchain
-                        .present_frame(present_queue, frame_data)
+                        .present_frame(device, frame_data)
                         .expect("Couldn't present image");
                 }
             }
@@ -277,7 +264,7 @@ impl App {
             } else {
                 log::debug!("New swapchain!");
                 Some(
-                    SwapChain::new(graphica_context, device_context, window)
+                    SwapChain::new(graphica_context, device_context, window, 1)
                         .expect("Error while recreating swapchain"),
                 )
             };
